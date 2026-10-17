@@ -4193,8 +4193,8 @@ static void OPENGL_GetTextureData2D(
 	}
 
 	glTexture = (OpenGLTexture*) texture;
-	textureWidth = glTexture->twod.width >> level;
-	textureHeight = glTexture->twod.height >> level;
+	textureWidth = SDL_max(1, glTexture->twod.width >> level);
+	textureHeight = SDL_max(1, glTexture->twod.height >> level);
 	BindTexture(renderer, glTexture);
 	glFormat = XNAToGL_TextureFormat[glTexture->format];
 	if (glFormat == GL_COMPRESSED_TEXTURE_FORMATS)
@@ -4313,7 +4313,7 @@ static void OPENGL_GetTextureDataCube(
 	}
 
 	glTexture = (OpenGLTexture*) texture;
-	textureSize = glTexture->cube.size >> level;
+	textureSize = SDL_max(1, glTexture->cube.size >> level);
 	BindTexture(renderer, glTexture);
 	glFormat = XNAToGL_TextureFormat[glTexture->format];
 	if (glFormat == GL_COMPRESSED_TEXTURE_FORMATS)

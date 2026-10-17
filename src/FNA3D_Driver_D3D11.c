@@ -3847,8 +3847,8 @@ static void D3D11_GetTextureData2D(
 		0,
 		tex->levelCount
 	);
-	int32_t texW = tex->twod.width >> level;
-	int32_t texH = tex->twod.height >> level;
+	int32_t texW = SDL_max(1, tex->twod.width >> level);
+	int32_t texH = SDL_max(1, tex->twod.height >> level);
 	D3D11_BOX srcBox = {0, 0, 0, texW, texH, 1};
 	D3D11_MAPPED_SUBRESOURCE subresource;
 	uint8_t *dataPtr = (uint8_t*) data;
@@ -3994,7 +3994,7 @@ static void D3D11_GetTextureDataCube(
 		0,
 		tex->levelCount
 	);
-	int32_t texSize = tex->cube.size >> level;
+	int32_t texSize = SDL_max(1, tex->cube.size >> level);
 	D3D11_BOX srcBox = {0, 0, 0, texSize, texSize, 1};
 	D3D11_MAPPED_SUBRESOURCE subresource;
 	uint8_t *dataPtr = (uint8_t*) data;
