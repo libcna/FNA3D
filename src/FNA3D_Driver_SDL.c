@@ -2136,7 +2136,14 @@ static void SDLGPU_SetViewport(
 	{
 		renderer->viewport = *viewport;
 
-		if (renderer->renderPass != NULL)
+		/* If we're waiting for a new render pass we can avoid making
+		 * this call, since BeginRenderPass does it for us anyway.
+		 *
+		 * This also avoids potential spec violations with rects that
+		 * are larger than the current render pass target size.
+		 * -flibit
+		 */
+		if (renderer->renderPass != NULL && !renderer->needNewRenderPass)
 		{
 			SDL_LockMutex(renderer->commandLock);
 			SDLGPU_INTERNAL_UpdateViewport(renderer, 0);
@@ -2162,7 +2169,14 @@ static void SDLGPU_SetScissorRect(
 		renderer->viewport.w, scissor->w,
 		renderer->viewport.h, scissor->h);
 
-	if (renderer->renderPass != NULL && renderer->fnaRasterizerState.scissorTestEnable)
+	/* If we're waiting for a new render pass we can avoid making
+	 * this call, since BeginRenderPass does it for us anyway.
+	 *
+	 * This also avoids potential spec violations with rects that
+	 * are larger than the current render pass target size.
+	 * -flibit
+	 */
+	if (renderer->renderPass != NULL && !renderer->needNewRenderPass && renderer->fnaRasterizerState.scissorTestEnable)
 	{
 		SDL_LockMutex(renderer->commandLock);
 		SDL_SetGPUScissor(
@@ -2331,7 +2345,7 @@ static void SDLGPU_ApplyRasterizerState(
 	{
 		renderer->fnaRasterizerState.scissorTestEnable = rasterizerState->scissorTestEnable;
 
-		if (renderer->renderPass != NULL)
+		if (renderer->renderPass != NULL && !renderer->needNewRenderPass)
 		{
 			if (renderer->fnaRasterizerState.scissorTestEnable)
 			{
@@ -2437,21 +2451,29 @@ static void SDLGPU_INTERNAL_BindDeferredState(
 		);
 		if (renderer->needVertexSamplerBind)
 		{
-			SDL_BindGPUVertexSamplers(
-				renderer->renderPass,
-				0,
-				renderer->vertexTextureSamplerBindings,
-				MOJOSHADER_sdlGetSamplerSlots(vertShaderData)
-			);
+			int slots = MOJOSHADER_sdlGetSamplerSlots(vertShaderData);
+			if (slots > 0)
+			{
+				SDL_BindGPUVertexSamplers(
+					renderer->renderPass,
+					0,
+					renderer->vertexTextureSamplerBindings,
+					slots
+				);
+			}
 		}
 		if (renderer->needFragmentSamplerBind)
 		{
-			SDL_BindGPUFragmentSamplers(
-				renderer->renderPass,
-				0,
-				renderer->fragmentTextureSamplerBindings,
-				MOJOSHADER_sdlGetSamplerSlots(fragShaderData)
-			);
+			int slots = MOJOSHADER_sdlGetSamplerSlots(fragShaderData);
+			if (slots > 0)
+			{
+				SDL_BindGPUFragmentSamplers(
+					renderer->renderPass,
+					0,
+					renderer->fragmentTextureSamplerBindings,
+					slots
+				);
+			}
 		}
 	}
 
