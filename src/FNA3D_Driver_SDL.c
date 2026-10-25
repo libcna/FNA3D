@@ -856,7 +856,13 @@ static void SDLGPU_INTERNAL_BeginRenderPass(
 	for (i = 0; i < renderer->nextRenderPassColorAttachmentCount; i += 1)
 	{
 		colorAttachmentInfos[i].texture = renderer->nextRenderPassColorAttachments[i]->texture;
-		colorAttachmentInfos[i].layer_or_depth_plane = renderer->nextRenderPassColorAttachmentCubeFace[i];
+		/* CNA: a multisampled cube face draws into its single-layer 2D renderbuffer and resolves
+		 * into the face; only a single-sampled face is itself a layer of the attachment.
+		 */
+		colorAttachmentInfos[i].layer_or_depth_plane =
+			(renderer->nextRenderPassColorResolves[i] != NULL) ?
+				0 :
+				renderer->nextRenderPassColorAttachmentCubeFace[i];
 		colorAttachmentInfos[i].mip_level = 0;
 
 		colorAttachmentInfos[i].load_op =
@@ -889,7 +895,10 @@ static void SDLGPU_INTERNAL_BeginRenderPass(
 			colorAttachmentInfos[i].resolve_texture = NULL;
 		}
 		colorAttachmentInfos[i].resolve_mip_level = 0;
-		colorAttachmentInfos[i].resolve_layer = 0;
+		colorAttachmentInfos[i].resolve_layer =
+			(renderer->nextRenderPassColorResolves[i] != NULL) ?
+				renderer->nextRenderPassColorAttachmentCubeFace[i] :
+				0;
 		colorAttachmentInfos[i].cycle_resolve_texture = colorAttachmentInfos[i].cycle;
 
 		if (renderer->shouldClearColorOnBeginPass)
