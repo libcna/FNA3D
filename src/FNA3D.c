@@ -376,6 +376,15 @@ void FNA3D_SetViewport(FNA3D_Device *device, FNA3D_Viewport *viewport)
 	device->SetViewport(device->driverData, viewport);
 }
 
+void FNA3D_SetXnaPixelCenterEXT(FNA3D_Device *device, uint8_t enabled)
+{
+	if (device == NULL)
+	{
+		return;
+	}
+	device->SetXnaPixelCenterEXT(device->driverData, enabled);
+}
+
 void FNA3D_SetScissorRect(FNA3D_Device *device, FNA3D_Rect *scissor)
 {
 	TRACE_SETSCISSORRECT

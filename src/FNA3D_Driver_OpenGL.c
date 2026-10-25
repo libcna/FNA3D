@@ -119,6 +119,7 @@ struct OpenGLRenderbuffer /* Cast from FNA3D_Renderbuffer* */
 {
 	GLuint handle;
 	FNA3D_SurfaceFormat format;
+	int32_t multiSampleCount;
 	OpenGLRenderbuffer *next; /* linked list */
 };
 
@@ -242,6 +243,7 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	/* Viewport */
 	FNA3D_Viewport viewport;
 	FNA3D_Rect scissorRect;
+	uint8_t xnaPixelCenterEnabled;
 	float depthRangeMin;
 	float depthRangeMax;
 
@@ -294,6 +296,7 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	const MOJOSHADER_effectTechnique *currentTechnique;
 	uint32_t currentPass;
 	uint8_t renderTargetBound;
+	int32_t renderTargetMultiSampleCount;
 	uint8_t effectApplied;
 
 	/* Point Sprite Toggle */
@@ -1466,6 +1469,27 @@ static void OPENGL_SwapBuffers(
 
 /* Drawing */
 
+static void OPENGL_ApplyXnaPixelCenter(
+	OpenGLRenderer *renderer,
+	FNA3D_PrimitiveType primitiveType
+) {
+	/* CNA asks for XNA/D3D9 integer pixel centres on ordinary triangle draws. 63/64 in clip space
+	 * is 63/128 of a viewport pixel: just under the half-pixel correction, avoiding the opposite
+	 * fill-rule tie. MSAA has its own sample positions and must stay unshifted. */
+	const uint8_t triangle =
+		primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLELIST ||
+		primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP;
+	const int32_t samples = renderer->renderTargetBound ?
+		renderer->renderTargetMultiSampleCount : renderer->backbuffer->multiSampleCount;
+	const uint8_t correct = renderer->xnaPixelCenterEnabled && triangle && samples <= 1 &&
+		renderer->viewport.w > 0 && renderer->viewport.h > 0;
+
+	MOJOSHADER_glProgramPixelCenterInfo(
+		correct ? (63.0f / 64.0f) / renderer->viewport.w : 0.0f,
+		correct ? -(63.0f / 64.0f) / renderer->viewport.h : 0.0f
+	);
+}
+
 static void OPENGL_Clear(
 	FNA3D_Renderer *driverData,
 	FNA3D_ClearOptions options,
@@ -1591,6 +1615,7 @@ static void OPENGL_DrawIndexedPrimitives(
 	uint8_t tps;
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
 	OpenGLBuffer *buffer = (OpenGLBuffer*) indices;
+	OPENGL_ApplyXnaPixelCenter(renderer, primitiveType);
 
 	BindIndexBuffer(renderer, buffer->handle);
 
@@ -1651,6 +1676,7 @@ static void OPENGL_DrawInstancedPrimitives(
 	uint8_t tps;
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
 	OpenGLBuffer *buffer = (OpenGLBuffer*) indices;
+	OPENGL_ApplyXnaPixelCenter(renderer, primitiveType);
 
 	SDL_assert(renderer->supports_ARB_draw_instanced);
 
@@ -1702,6 +1728,7 @@ static void OPENGL_DrawPrimitives(
 ) {
 	uint8_t tps;
 	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
+	OPENGL_ApplyXnaPixelCenter(renderer, primitiveType);
 
 	tps = (	renderer->togglePointSprite &&
 		primitiveType == FNA3D_PRIMITIVETYPE_POINTLIST_EXT	);
@@ -1775,6 +1802,12 @@ static void OPENGL_SetViewport(FNA3D_Renderer *driverData, FNA3D_Viewport *viewp
 			);
 		}
 	}
+}
+
+static void OPENGL_SetXnaPixelCenterEXT(FNA3D_Renderer *driverData, uint8_t enabled)
+{
+	/* SpriteBatch disables this: its projection already owns XNA's sprite placement convention. */
+	((OpenGLRenderer*) driverData)->xnaPixelCenterEnabled = enabled;
 }
 
 static void OPENGL_SetScissorRect(FNA3D_Renderer *driverData, FNA3D_Rect *scissor)
@@ -2596,6 +2629,7 @@ static void OPENGL_SetRenderTargets(
 				renderer->realBackbufferFBO
 		);
 		renderer->renderTargetBound = 0;
+		renderer->renderTargetMultiSampleCount = 0;
 		ApplySRGBFlag(renderer, renderer->backbuffer->isSrgb);
 		return;
 	}
@@ -2603,6 +2637,9 @@ static void OPENGL_SetRenderTargets(
 	{
 		BindFramebuffer(renderer, renderer->targetFramebuffer);
 		renderer->renderTargetBound = 1;
+		renderer->renderTargetMultiSampleCount =
+			renderTargets[0].colorBuffer != NULL ?
+				((OpenGLRenderbuffer*) renderTargets[0].colorBuffer)->multiSampleCount : 0;
 	}
 
 	for (i = 0; i < numRenderTargets; i += 1)
@@ -4401,6 +4438,7 @@ static FNA3D_Renderbuffer* OPENGL_GenColorRenderbuffer(
 	);
 	renderbuffer->next = NULL;
 	renderbuffer->format = format;
+	renderbuffer->multiSampleCount = multiSampleCount;
 
 	renderer->glGenRenderbuffers(1, &renderbuffer->handle);
 	renderer->glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer->handle);

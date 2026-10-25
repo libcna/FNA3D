@@ -354,6 +354,7 @@ struct FNA3D_Device
 	/* Mutable Render States */
 
 	void (*SetViewport)(FNA3D_Renderer *driverData, FNA3D_Viewport *viewport);
+	void (*SetXnaPixelCenterEXT)(FNA3D_Renderer *driverData, uint8_t enabled);
 	void (*SetScissorRect)(FNA3D_Renderer *driverData, FNA3D_Rect *scissor);
 
 	void (*GetBlendFactor)(
@@ -750,6 +751,7 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(DrawInstancedPrimitives, name) \
 	ASSIGN_DRIVER_FUNC(DrawPrimitives, name) \
 	ASSIGN_DRIVER_FUNC(SetViewport, name) \
+	ASSIGN_DRIVER_FUNC(SetXnaPixelCenterEXT, name) \
 	ASSIGN_DRIVER_FUNC(SetScissorRect, name) \
 	ASSIGN_DRIVER_FUNC(GetBlendFactor, name) \
 	ASSIGN_DRIVER_FUNC(SetBlendFactor, name) \

@@ -557,6 +557,7 @@ typedef struct SDLGPU_Renderer
 	PackedVertexBufferBindingsArray vertexBufferBindingsCache;
 
 	FNA3D_Viewport viewport;
+	uint8_t xnaPixelCenterEnabled;
 
 	/* Vertex buffer bind settings */
 	uint32_t numVertexBindings;
@@ -780,7 +781,10 @@ static void SDLGPU_INTERNAL_EndRenderPass(
 	renderer->currentStencilReference = 0;
 }
 
-static void SDLGPU_INTERNAL_UpdateViewport(SDLGPU_Renderer *renderer)
+static void SDLGPU_INTERNAL_UpdateViewport(
+	SDLGPU_Renderer *renderer,
+	uint8_t correctXnaPixelCenter
+)
 {
 	/* commandLock should be acquired by this point */
 
@@ -793,6 +797,13 @@ static void SDLGPU_INTERNAL_UpdateViewport(SDLGPU_Renderer *renderer)
 	gpuViewport.h = (float) renderer->viewport.h;
 	gpuViewport.min_depth = renderer->viewport.minDepth;
 	gpuViewport.max_depth = renderer->viewport.maxDepth;
+	if (correctXnaPixelCenter)
+	{
+		/* XNA/D3D9 uses integer pixel centres. 63/128 moves modern half-integer centres just
+		 * inside the triangle without landing exactly on the opposite fill-rule tie. */
+		gpuViewport.x += 63.0f / 128.0f;
+		gpuViewport.y += 63.0f / 128.0f;
+	}
 
 	SDL_SetGPUViewport(
 		renderer->renderPass,
@@ -945,7 +956,7 @@ static void SDLGPU_INTERNAL_BeginRenderPass(
 		renderer->nextRenderPassDepthStencilAttachment != NULL ? &depthStencilAttachmentInfo : NULL
 	);
 
-	SDLGPU_INTERNAL_UpdateViewport(renderer);
+	SDLGPU_INTERNAL_UpdateViewport(renderer, 0);
 
 	renderer->shouldClearColorOnBeginPass = 0;
 	renderer->shouldClearDepthOnBeginPass = 0;
@@ -2119,10 +2130,16 @@ static void SDLGPU_SetViewport(
 		if (renderer->renderPass != NULL)
 		{
 			SDL_LockMutex(renderer->commandLock);
-			SDLGPU_INTERNAL_UpdateViewport(renderer);
+			SDLGPU_INTERNAL_UpdateViewport(renderer, 0);
 			SDL_UnlockMutex(renderer->commandLock);
 		}
 	}
+}
+
+static void SDLGPU_SetXnaPixelCenterEXT(FNA3D_Renderer *driverData, uint8_t enabled)
+{
+	/* SpriteBatch disables this: its projection already owns XNA's sprite placement convention. */
+	((SDLGPU_Renderer*) driverData)->xnaPixelCenterEnabled = enabled;
 }
 
 static void SDLGPU_SetScissorRect(
@@ -2373,6 +2390,13 @@ static void SDLGPU_INTERNAL_BindDeferredState(
 	}
 
 	SDLGPU_INTERNAL_BeginRenderPass(renderer);
+	SDLGPU_INTERNAL_UpdateViewport(
+		renderer,
+		renderer->xnaPixelCenterEnabled &&
+		(primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLELIST ||
+		 primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP) &&
+		renderer->nextRenderPassMultisampleCount == SDL_GPU_SAMPLECOUNT_1
+	);
 
 	SDLGPU_INTERNAL_BindGraphicsPipeline(renderer);
 

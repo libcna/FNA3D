@@ -646,6 +646,11 @@ FNA3DAPI void FNA3D_DrawPrimitives(
  */
 FNA3DAPI void FNA3D_SetViewport(FNA3D_Device *device, FNA3D_Viewport *viewport);
 
+/* CNA extension: selects XNA/D3D9 integer pixel centers for ordinary 3D draws.
+ * SpriteBatch already supplies its own half-pixel convention and must disable this mode.
+ */
+FNA3DAPI void FNA3D_SetXnaPixelCenterEXT(FNA3D_Device *device, uint8_t enabled);
+
 /* Sets the scissor box for rendering, relative to the active render target.
  * It is required to call this at least once after calling SetRenderTargets, as
  * the renderer may need to adjust these dimensions to fit the backend's
