@@ -291,7 +291,15 @@ void FNA3D_Trace_DestroyDevice(void)
 	#undef FREE_TRACES
 	FNA3D_Trace_FlushMemory();
 	SDL_free(traceBuffer);
+	/* CNA: the trace ends with its device. Each CreateDevice makes a new lock and buffer, so
+	 * this lock was lost with every device, and a call after this one would have written into
+	 * the freed buffer.
+	 */
+	traceBuffer = NULL;
+	traceEnabled = SDL_FALSE;
 	SDL_UnlockMutex(traceLock);
+	SDL_DestroyMutex(traceLock);
+	traceLock = NULL;
 }
 
 void FNA3D_Trace_SwapBuffers(
