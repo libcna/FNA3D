@@ -2437,12 +2437,12 @@ static void SDLGPU_INTERNAL_BindDeferredState(
 	}
 
 	SDLGPU_INTERNAL_BeginRenderPass(renderer);
+	/* CNA: multisampled destinations are corrected too; XNA keeps integer centres there */
 	SDLGPU_INTERNAL_UpdateViewport(
 		renderer,
 		renderer->xnaPixelCenterEnabled &&
 		(primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLELIST ||
-		 primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP) &&
-		renderer->nextRenderPassMultisampleCount == SDL_GPU_SAMPLECOUNT_1
+		 primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP)
 	);
 
 	SDLGPU_INTERNAL_BindGraphicsPipeline(renderer);

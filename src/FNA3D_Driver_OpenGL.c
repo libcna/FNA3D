@@ -1504,13 +1504,13 @@ static void OPENGL_ApplyXnaPixelCenter(
 ) {
 	/* CNA asks for XNA/D3D9 integer pixel centres on ordinary triangle draws. 63/64 in clip space
 	 * is 63/128 of a viewport pixel: just under the half-pixel correction, avoiding the opposite
-	 * fill-rule tie. MSAA has its own sample positions and must stay unshifted. */
+	 * fill-rule tie. A multisampled destination is corrected too: XNA keeps integer centres there,
+	 * its samples sitting around them (measured on XNA 4.0, CNA spikes/xna-msaa-pixel-center-spike).
+	 */
 	const uint8_t triangle =
 		primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLELIST ||
 		primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP;
-	const int32_t samples = renderer->renderTargetBound ?
-		renderer->renderTargetMultiSampleCount : renderer->backbuffer->multiSampleCount;
-	const uint8_t correct = renderer->xnaPixelCenterEnabled && triangle && samples <= 1 &&
+	const uint8_t correct = renderer->xnaPixelCenterEnabled && triangle &&
 		renderer->viewport.w > 0 && renderer->viewport.h > 0;
 
 	MOJOSHADER_glProgramPixelCenterInfo(

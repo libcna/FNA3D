@@ -1708,11 +1708,11 @@ static void D3D11_ApplyXnaPixelCenter(
 ) {
 	/* CNA asks for XNA/D3D9 integer pixel centres on ordinary triangle draws. A modern viewport
 	 * starts at a half-integer pixel centre, so 63/128 moves geometry just under half a pixel and
-	 * avoids the opposite fill-rule tie. MSAA has its own sample positions and must stay unshifted. */
+	 * avoids the opposite fill-rule tie. A multisampled destination is corrected too: XNA keeps
+	 * integer centres there (measured on XNA 4.0, CNA spikes/xna-msaa-pixel-center-spike). */
 	const uint8_t correct = renderer->xnaPixelCenterEnabled &&
 		(primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLELIST ||
-		 primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP) &&
-		renderer->renderTargetMultiSampleCount <= 1;
+		 primitiveType == FNA3D_PRIMITIVETYPE_TRIANGLESTRIP);
 	D3D11_VIEWPORT viewport =
 	{
 		(float) renderer->viewport.x + (correct ? 63.0f / 128.0f : 0.0f),
