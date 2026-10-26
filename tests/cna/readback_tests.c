@@ -61,6 +61,17 @@ static int failures = 0;
 static int checks = 0;
 static int es3 = 0;
 
+/* The driver the device runs on (see IdentifyDriver). */
+typedef enum Driver
+{
+	DRIVER_UNKNOWN,
+	DRIVER_OPENGL,
+	DRIVER_D3D11,
+	DRIVER_SDLGPU
+} Driver;
+static Driver driver = DRIVER_UNKNOWN;
+static Driver announcedDriver = DRIVER_UNKNOWN;
+
 #define CHECK(condition, ...) \
 	do { \
 		checks += 1; \
@@ -179,6 +190,77 @@ static int GuardIntact(const uint8_t *buffer, size_t bytes, size_t extent)
 		}
 	}
 	return 1;
+}
+
+static Driver DriverNamed(const char *name)
+{
+	if (SDL_strcasecmp(name, "OpenGL") == 0)
+	{
+		return DRIVER_OPENGL;
+	}
+	if (SDL_strcasecmp(name, "D3D11") == 0)
+	{
+		return DRIVER_D3D11;
+	}
+	if (	SDL_strcasecmp(name, "SDLGPU") == 0 ||
+		SDL_strcasecmp(name, "Vulkan") == 0 ||
+		SDL_strcasecmp(name, "D3D12") == 0 ||
+		SDL_strcasecmp(name, "Metal") == 0	)
+	{
+		return DRIVER_SDLGPU; /* FNA3D_PrepareWindowAttributes' aliases */
+	}
+	return DRIVER_UNKNOWN;
+}
+
+static const char *DriverLabel(Driver which)
+{
+	switch (which)
+	{
+		case DRIVER_OPENGL:	return es3 ? "OpenGL ES 3" : "OpenGL";
+		case DRIVER_D3D11:	return "D3D11";
+		case DRIVER_SDLGPU:	return "SDL_GPU";
+		default:		return "an unknown driver";
+	}
+}
+
+/* FNA3D's log, as FNA3D's own default sends it; the OpenGL and D3D11 drivers name themselves in
+ * it ("FNA3D Driver: <name>") as they make the device.
+ */
+static void FNA3DCALL LogInfo(const char *message)
+{
+	const char prefix[] = "FNA3D Driver: ";
+	if (SDL_strncmp(message, prefix, sizeof(prefix) - 1) == 0)
+	{
+		announcedDriver = DriverNamed(message + sizeof(prefix) - 1);
+	}
+	SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+}
+
+static void FNA3DCALL LogWarn(const char *message)
+{
+	SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+}
+
+static void FNA3DCALL LogError(const char *message)
+{
+	SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "%s", message);
+}
+
+/* Which driver made the device. The OpenGL and D3D11 drivers announce themselves; the SDL_GPU
+ * driver announces no name, so a device no driver announced is SDL_GPU's. FNA3D_GetSysRendererEXT
+ * would say, but a TRACING_SUPPORT build asserts in it. When FNA3D_FORCE_DRIVER names the driver
+ * -- as every registered test does -- the device must be that driver's.
+ */
+static Driver IdentifyDriver(void)
+{
+	const char *forced = SDL_GetHint("FNA3D_FORCE_DRIVER");
+	const Driver made = (announcedDriver != DRIVER_UNKNOWN) ? announcedDriver : DRIVER_SDLGPU;
+	if (forced != NULL && forced[0] != '\0')
+	{
+		CHECK(DriverNamed(forced) == made,
+			"FNA3D_FORCE_DRIVER=%s, but the device is %s's", forced, DriverLabel(made));
+	}
+	return made;
 }
 
 static int32_t MipSize(int32_t size, int32_t level)
@@ -890,8 +972,10 @@ static void TestOversizedDestination(FNA3D_Device *device)
 
 /* A block-compressed level is read in whole blocks: a 4x4 DXT1 level is one 8-byte block, an 8x8
  * one four. The SDL_GPU driver reads them back exactly; OpenGL and D3D11 have no compressed
- * readback and must refuse, leaving the destination untouched. Either way nothing may be written
- * past the blocks -- CNA probes this with an 8-byte block on the stack.
+ * readback and must refuse, leaving the destination untouched -- which driver this is comes from
+ * IdentifyDriver(), not from whether a GL context exists, which D3D11 has no more than SDL_GPU.
+ * Either way nothing may be written past the blocks -- CNA probes this with an 8-byte block on
+ * the stack.
  */
 static void TestCompressedReadback(FNA3D_Device *device)
 {
@@ -914,7 +998,7 @@ static void TestCompressedReadback(FNA3D_Device *device)
 		FNA3D_GetTextureData2D(device, texture, 0, 0, size, size, 0, buffer, (int32_t) bytes);
 		CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 			"DXT1 %dx%d: wrote past its %zu bytes of blocks", size, size, bytes);
-		if (SDL_GL_GetCurrentContext() == NULL)
+		if (driver == DRIVER_SDLGPU)
 		{
 			CHECK(memcmp(buffer, blocks, bytes) == 0,
 				"DXT1 %dx%d: the blocks read back differ from the upload", size, size);
@@ -922,8 +1006,8 @@ static void TestCompressedReadback(FNA3D_Device *device)
 		else
 		{
 			CHECK(Untouched(buffer, bytes),
-				"DXT1 %dx%d: OpenGL has no compressed readback but wrote the destination",
-				size, size);
+				"DXT1 %dx%d: %s has no compressed readback but wrote the destination",
+				size, size, DriverLabel(driver));
 		}
 		free(buffer);
 		FNA3D_AddDisposeTexture(device, texture);
@@ -972,6 +1056,7 @@ int main(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 	es3 = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_ES3", false);
+	FNA3D_HookLogFunctions(LogInfo, LogWarn, LogError);
 	if (!SDL_Init(SDL_INIT_VIDEO))
 	{
 		fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -998,6 +1083,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "FNA3D_CreateDevice failed\n");
 		return 1;
 	}
+	driver = IdentifyDriver();
 
 	for (i = 0; i < SDL_arraysize(formats); i += 1)
 	{
@@ -1019,7 +1105,7 @@ int main(int argc, char **argv)
 	TestForeignPackAlignment(device);
 	TestForeignUnpackState(device);
 	TestOversizedDestination(device);
-	label = (SDL_GL_GetCurrentContext() == NULL) ? "Non-GL driver" : (es3 ? "OpenGL ES 3" : "OpenGL");
+	label = DriverLabel(driver);
 
 	FNA3D_DestroyDevice(device);
 	SDL_DestroyWindow(window);

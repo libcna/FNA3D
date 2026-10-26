@@ -14,7 +14,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   ES 3 RGBA8, sRGB RGBA8 and the float formats must read back; any other format must read back
   exactly when `GL_IMPLEMENTATION_COLOR_READ_FORMAT`/`_TYPE`, asked of the level attached to a
   framebuffer of the test's own, are the format's layout, and must be refused otherwise. 4x
-  multisampled RGBA8 and sRGB targets must resolve to their clear colour. On OpenGL, reads with
+  multisampled RGBA8 and sRGB targets must resolve to their clear colour. DXT1 levels must read
+  back as their blocks on SDL_GPU and be refused, the destination untouched, on OpenGL and D3D11;
+  the driver is the one FNA3D announces (SDL_GPU announces none), checked against
+  `FNA3D_FORCE_DRIVER`. On OpenGL, reads with
   `GL_PACK_ALIGNMENT` 8 and uploads (2D, cube face, volume) with `GL_UNPACK_ALIGNMENT` 8 -- and
   then a row length and skipped rows, pixels and images too -- left on the context must stay
   tightly packed and leave that state in place. Build with
