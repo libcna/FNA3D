@@ -73,9 +73,6 @@ endif()
 if(BUILD_SDL3)
 	add_definitions(-DUSE_SDL3)
 endif()
-if (MOJOSHADER_STATIC_SPIRVCROSS)
-	add_definitions(-DSDL_GPU_SHADERCROSS_STATIC)
-endif()
 
 if(WIN32 OR BUILD_DXVK_NATIVE)
 	add_definitions(
@@ -131,6 +128,16 @@ add_library(mojoshader STATIC
 	MojoShader/profiles/mojoshader_profile_spirv.c
 	MojoShader/profiles/mojoshader_profile_metal.c
 )
+# CNA: MojoShader's SDL_GPU glue selects its statically linked SDL_shadercross, instead of loading
+# the shared library at run time, with CNA_MOJOSHADER_SDL_GPU_SHADERCROSS_STATIC; the
+# SDL_GPU_SHADERCROSS_STATIC this option used to define is read by nothing. SPIRV-Cross is C++, so
+# the C++ language is enabled for its runtime to be linked in as well.
+if(MOJOSHADER_STATIC_SPIRVCROSS)
+	enable_language(CXX)
+	find_package(SDL3_shadercross CONFIG REQUIRED)
+	target_compile_definitions(mojoshader PRIVATE CNA_MOJOSHADER_SDL_GPU_SHADERCROSS_STATIC)
+	target_link_libraries(mojoshader PRIVATE SDL3_shadercross::SDL3_shadercross-static)
+endif()
 if(TRACING_SUPPORT)
 	add_executable(fna3d_replay replay/replay.c)
 	target_link_libraries(fna3d_replay FNA3D)
