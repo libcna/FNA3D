@@ -223,26 +223,37 @@ FNA3D_Device* FNA3D_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
 ) {
+	FNA3D_Device *result;
+
+	/* CNA: traced as requested, before the driver adjusts the parameters; a device that is
+	 * not made leaves the trace session it was counted in, as it gets no DestroyDevice.
+	 */
 	TRACE_CREATEDEVICE
 	if (selectedDriver < 0)
 	{
 		FNA3D_LogError("Call FNA3D_PrepareWindowAttributes first!");
+		TRACE_DESTROYDEVICE
 		return NULL;
 	}
 
-	return drivers[selectedDriver]->CreateDevice(
+	result = drivers[selectedDriver]->CreateDevice(
 		presentationParameters,
 		debugMode
 	);
+	if (result == NULL)
+	{
+		TRACE_DESTROYDEVICE
+	}
+	return result;
 }
 
 void FNA3D_DestroyDevice(FNA3D_Device *device)
 {
-	TRACE_DESTROYDEVICE
 	if (device == NULL)
 	{
 		return;
 	}
+	TRACE_DESTROYDEVICE /* CNA: after the check, as no device was counted for NULL */
 
 	device->DestroyDevice(device);
 }

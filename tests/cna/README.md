@@ -65,6 +65,13 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   write cannot show. `fna3d_dumpspirv` then dumps the trace and `spirv_check.c`, linking the same
   shaders through libFNA3D's MojoShader, finds the Depth element linked as DEPTH, not as
   POSITION. `SDL_ASSERT=abort` turns either tool's assertions into failures.
+- `trace_overlap_tests.c` (`TRACING_SUPPORT` builds only; `fna3d_cna_trace_overlap_opengl`,
+  `_opengl_es3`, `_sdlgpu`, each in a `trace-overlap-<driver>` directory of its own): a
+  `CreateDevice` that makes no device (before `FNA3D_PrepareWindowAttributes`) must leave no SDL
+  allocation behind; then two overlapping devices -- a marker through each, `DestroyDevice(NULL)`,
+  the first destroyed, a marker through the second -- must leave none either, and
+  `FNA3D_Trace.bin` must be exactly the first device's `CreateDevice` record, the three markers
+  and one `DestroyDevice` record. Live allocations are counted as in `dispose_tests.c`.
 - `test_effect.h`: the minimal Effect the drawing tests use, built in memory from the Effects
   Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of

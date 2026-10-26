@@ -164,6 +164,34 @@ else()
 		"fna3d_cna_replay_sdl2_* are not registered")
 endif()
 
+# One trace session spans overlapping devices, and a device that is not made ends the session it
+# was counted in (trace_overlap_tests.c), on each driver; it writes FNA3D_Trace.bin into a
+# directory of its own.
+if(TRACING_SUPPORT)
+	add_executable(fna3d_cna_trace_overlap_tests trace_overlap_tests.c)
+	target_link_libraries(fna3d_cna_trace_overlap_tests PRIVATE FNA3D)
+	target_include_directories(fna3d_cna_trace_overlap_tests PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+	if(TARGET SDL3::SDL3)
+		target_link_libraries(fna3d_cna_trace_overlap_tests PRIVATE SDL3::SDL3)
+	endif()
+	foreach(variant opengl opengl_es3 sdlgpu)
+		if(variant STREQUAL "opengl")
+			set(environment "FNA3D_FORCE_DRIVER=OpenGL")
+		elseif(variant STREQUAL "opengl_es3")
+			set(environment "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+		else()
+			set(environment "FNA3D_FORCE_DRIVER=SDLGPU")
+		endif()
+		set(directory "${CMAKE_CURRENT_BINARY_DIR}/trace-overlap-${variant}")
+		file(MAKE_DIRECTORY "${directory}")
+		add_test(NAME fna3d_cna_trace_overlap_${variant} COMMAND fna3d_cna_trace_overlap_tests
+			WORKING_DIRECTORY "${directory}")
+		set_tests_properties(fna3d_cna_trace_overlap_${variant} PROPERTIES
+			ENVIRONMENT "${environment}")
+	endforeach()
+endif()
+
 # A recorded trace replays and dumps as it was captured (trace_tests.cmake), on each driver;
 # only a TRACING_SUPPORT build has the trace writer, fna3d_replay and fna3d_dumpspirv.
 if(TRACING_SUPPORT AND TARGET fna3d_replay)

@@ -213,6 +213,7 @@ void FNA3D_Trace_RegisterEffect(FNA3D_Effect *effect, MOJOSHADER_effect *effectD
 static SDL_bool traceEnabled = SDL_FALSE;
 static void* windowHandle = NULL;
 static SDL_Mutex *traceLock = NULL;
+static uint32_t traceDeviceCount = 0; /* CNA: the devices the trace session serves */
 
 static void* traceBuffer = NULL;
 static uint32_t traceBufferCurrentSize = 0;
@@ -231,6 +232,24 @@ void FNA3D_Trace_CreateDevice(
 	uint8_t debugMode
 ) {
 	SDL_IOStream* traceFile;
+
+	/* CNA: a trace session lasts from the first device's CreateDevice to the last device's
+	 * DestroyDevice. A device created while another lives joins the session (enabled or not):
+	 * its calls go into the same trace, as no record names a device, and it opens no second
+	 * buffer and lock over the first's -- which used to be lost, with the first device's
+	 * unflushed records -- and writes no second CreateDevice record, which replay would refuse;
+	 * nor does the first device's DestroyDevice end the trace under the second.
+	 */
+	traceDeviceCount += 1;
+	if (traceDeviceCount > 1)
+	{
+		if (traceEnabled)
+		{
+			SDL_Log("FNA3D tracing: another device joins the trace");
+		}
+		return;
+	}
+
 	traceEnabled = !SDL_GetHintBoolean("FNA3D_DISABLE_TRACING", SDL_FALSE);
 	if (!traceEnabled)
 	{
@@ -258,6 +277,17 @@ void FNA3D_Trace_CreateDevice(
 
 void FNA3D_Trace_DestroyDevice(void)
 {
+	/* CNA: only the last of the session's devices ends it */
+	if (traceDeviceCount == 0)
+	{
+		return;
+	}
+	traceDeviceCount -= 1;
+	if (traceDeviceCount > 0)
+	{
+		return;
+	}
+
 	if (!traceEnabled)
 	{
 		return;
