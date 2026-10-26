@@ -237,6 +237,7 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	/* Rasterizer State */
 	uint8_t scissorTestEnable;
 	FNA3D_CullMode cullFrontFace;
+	GLenum frontFace; /* CNA: glFrontFace as last set; GL's initial GL_CCW */
 	FNA3D_FillMode fillMode;
 	float depthBias;
 	float slopeScaleDepthBias;
@@ -2253,7 +2254,8 @@ static void OPENGL_ApplyRasterizerState(
 		renderer->cullFrontFace = actualMode;
 		if (renderer->cullFrontFace != FNA3D_CULLMODE_NONE)
 		{
-			renderer->glFrontFace(XNAToGL_FrontFace[renderer->cullFrontFace]);
+			renderer->frontFace = XNAToGL_FrontFace[renderer->cullFrontFace];
+			renderer->glFrontFace(renderer->frontFace);
 		}
 	}
 
@@ -2620,6 +2622,17 @@ static void OPENGL_ApplyVertexBufferBindings(
 		renderer->viewport.w, renderer->viewport.h,
 		renderer->backbuffer->width, renderer->backbuffer->height,
 		renderer->renderTargetBound
+	);
+
+	/* CNA: VFACE is positive on XNA's front faces, the clockwise ones, whatever the cull mode;
+	 * gl_FrontFacing is true on whichever winding glFrontFace names, and ApplyRasterizerState
+	 * picks that to cull with: it follows the cull mode, and stays as it was under CullNone.
+	 * A clockwise XNA triangle is GL_CCW in a render target, which MOJOSHADER_FLIP_RENDERTARGET
+	 * renders upside down, and GL_CW on the backbuffer. Where glFrontFace names the other
+	 * winding the shader-visible sign is inverted.
+	 */
+	MOJOSHADER_glProgramVFaceFlipInfo(
+		renderer->frontFace != (renderer->renderTargetBound ? GL_CCW : GL_CW)
 	);
 }
 
@@ -6277,6 +6290,7 @@ FNA3D_Device* OPENGL_CreateDevice(
 	/* Init the OpenGLRenderer */
 	renderer = (OpenGLRenderer*) SDL_malloc(sizeof(OpenGLRenderer));
 	SDL_memset(renderer, '\0', sizeof(OpenGLRenderer));
+	renderer->frontFace = GL_CCW;
 
 	/* The FNA3D_Device and OpenGLRenderer need to reference each other */
 	renderer->parentDevice = result;
