@@ -4374,6 +4374,7 @@ static void OPENGL_SetTextureData3D(
 ) {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture = (OpenGLTexture*) texture;
+	int32_t packSize;
 	FNA3D_Command cmd;
 
 	SDL_assert(renderer->supports_3DTexture);
@@ -4397,6 +4398,14 @@ static void OPENGL_SetTextureData3D(
 
 	BindTexture(renderer, glTexture);
 
+	/* CNA: tightly packed rows, as SetTextureData2D reads them; GL_UNPACK_ALIGNMENT's default of
+	 * 4 reads past the end of an odd-width one- or two-byte volume.
+	 */
+	packSize = OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format);
+	if (packSize != 4)
+	{
+		renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, packSize);
+	}
 	renderer->glTexSubImage3D(
 		GL_TEXTURE_3D,
 		level,
@@ -4410,6 +4419,10 @@ static void OPENGL_SetTextureData3D(
 		XNAToGL_TextureDataType[glTexture->format],
 		data
 	);
+	if (packSize != 4)
+	{
+		renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	}
 }
 
 static void OPENGL_SetTextureDataCube(
@@ -4427,6 +4440,7 @@ static void OPENGL_SetTextureDataCube(
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture = (OpenGLTexture*) texture;
 	GLenum glFormat;
+	int32_t packSize;
 	FNA3D_Command cmd;
 
 	if (renderer->threadID != SDL_GetCurrentThreadID())
@@ -4470,6 +4484,14 @@ static void OPENGL_SetTextureDataCube(
 	}
 	else
 	{
+		/* CNA: tightly packed rows, as SetTextureData2D reads them; GL_UNPACK_ALIGNMENT's
+		 * default of 4 read past the end of an odd-size one- or two-byte face.
+		 */
+		packSize = OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format);
+		if (packSize != 4)
+		{
+			renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, packSize);
+		}
 		renderer->glTexSubImage2D(
 			GL_TEXTURE_CUBE_MAP_POSITIVE_X + cubeMapFace,
 			level,
@@ -4481,6 +4503,10 @@ static void OPENGL_SetTextureDataCube(
 			XNAToGL_TextureDataType[glTexture->format],
 			data
 		);
+		if (packSize != 4)
+		{
+			renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+		}
 	}
 }
 
