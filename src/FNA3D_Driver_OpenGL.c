@@ -389,7 +389,12 @@ static int32_t XNAToGL_TextureInternalFormat[] =
 	GL_RGBA16F,				/* SurfaceFormat.HalfVector4 */
 	GL_RGBA16F,				/* SurfaceFormat.HdrBlendable */
 	GL_RGBA8,				/* SurfaceFormat.ColorBgraEXT */
-	GL_SRGB_ALPHA_EXT,			/* SurfaceFormat.ColorSrgbEXT */
+	/* CNA: sized. OpenGL ES 3 takes an unsized internal format only with a matching format
+	 * (ES 3.2 table 8.3, which has no SRGB_ALPHA), so GL_SRGB_ALPHA_EXT with GL_RGBA was
+	 * GL_INVALID_OPERATION and the texture never had storage; and no renderbuffer takes it,
+	 * in ES 3 or desktop GL (color-renderable is RGBA or a sized format, GL 4.6 section 9.4).
+	 */
+	GL_SRGB8_ALPHA8_EXT,			/* SurfaceFormat.ColorSrgbEXT */
 	GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT,	/* SurfaceFormat.Dxt5SrgbEXT */
 	GL_COMPRESSED_RGBA_BPTC_UNORM_EXT,	/* SurfaceFormat.BC7EXT */
 	GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT,/* SurfaceFormat.BC7SrgbEXT */
@@ -3499,12 +3504,12 @@ static uint16_t OPENGL_INTERNAL_FloatToHalf(float value)
 /* OpenGL ES 3 has no glGetTexImage, so there a level -- of a 2D texture, or of one cube face --
  * is attached to the resolve framebuffer and read with glReadPixels, which ES 3 guarantees only as
  * RGBA/UNSIGNED_BYTE for a normalized colour buffer and RGBA/FLOAT for a float one, plus the one
- * format/type pair the implementation names for the bound buffer. RGBA8 comes back in its own
- * layout; a float format is read as RGBA float and keeps its own channels, as floats or halves;
- * any other format is read directly when the implementation's own pair is the format's layout,
- * and refused otherwise rather than read in another layout. sRGB RGBA8 is refused too: ES 3
- * decodes an sRGB colour buffer to linear as it reads it, so the bytes would not be the
- * texture's.
+ * format/type pair the implementation names for the bound buffer. RGBA8 and sRGB RGBA8 come back
+ * in their own layout -- ReadPixels converts no sRGB encoding (ES 3.2 sections 16.1.3-16.1.5), so
+ * an sRGB level's bytes are its encoded texels; a float format is read as RGBA float and keeps
+ * its own channels, as floats or halves; any other format is read directly when the
+ * implementation's own pair is the format's layout, and refused otherwise rather than read in
+ * another layout.
  */
 static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 	OpenGLRenderer *renderer,
@@ -3532,7 +3537,8 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 
 	switch (texture->format)
 	{
-		case FNA3D_SURFACEFORMAT_COLOR:		direct = 1;			break;
+		case FNA3D_SURFACEFORMAT_COLOR:
+		case FNA3D_SURFACEFORMAT_COLORSRGB_EXT:	direct = 1;			break;
 		case FNA3D_SURFACEFORMAT_SINGLE:		channels = 1;			break;
 		case FNA3D_SURFACEFORMAT_VECTOR2:		channels = 2;			break;
 		case FNA3D_SURFACEFORMAT_VECTOR4:		channels = 4;			break;
@@ -3540,13 +3546,6 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 		case FNA3D_SURFACEFORMAT_HALFVECTOR2:	channels = 2; half = 1;	break;
 		case FNA3D_SURFACEFORMAT_HALFVECTOR4:
 		case FNA3D_SURFACEFORMAT_HDRBLENDABLE:	channels = 4; half = 1;	break;
-		case FNA3D_SURFACEFORMAT_COLORSRGB_EXT:
-			FNA3D_LogError(
-				"GetData: OpenGL ES 3 reads an sRGB target back decoded to linear, "
-				"not as its SurfaceFormat %d bytes",
-				texture->format
-			);
-			return 0;
 		default:
 			/* Decided once the level is attached: the implementation's own pair. */
 			direct = 2;

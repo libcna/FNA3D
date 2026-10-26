@@ -21,6 +21,36 @@
 #define GUARD_BYTES 64
 #define GL_PACK_ALIGNMENT_ENUM 0x0D05
 
+/* The GL names the ES 3 read-layout query needs (tests do not include a GL header). */
+#define GL_RED_ENUM		0x1903
+#define GL_ALPHA_ENUM		0x1906
+#define GL_RGB_ENUM		0x1907
+#define GL_RGBA_ENUM		0x1908
+#define GL_RG_ENUM		0x8227
+#define GL_BGRA_ENUM		0x80E1
+#define GL_BYTE_ENUM		0x1400
+#define GL_UNSIGNED_BYTE_ENUM	0x1401
+#define GL_UNSIGNED_SHORT_ENUM	0x1403
+#define GL_UNSIGNED_SHORT_5_6_5_ENUM		0x8363
+#define GL_UNSIGNED_SHORT_4_4_4_4_REV_ENUM	0x8365
+#define GL_UNSIGNED_SHORT_1_5_5_5_REV_ENUM	0x8366
+#define GL_UNSIGNED_INT_2_10_10_10_REV_ENUM	0x8368
+#define GL_TEXTURE_2D_ENUM			0x0DE1
+#define GL_TEXTURE_CUBE_MAP_POSITIVE_X_ENUM	0x8515
+#define GL_TEXTURE_BINDING_2D_ENUM		0x8069
+#define GL_TEXTURE_BINDING_CUBE_MAP_ENUM	0x8514
+#define GL_ACTIVE_TEXTURE_ENUM			0x84E0
+#define GL_TEXTURE0_ENUM			0x84C0
+#define GL_FRAMEBUFFER_ENUM			0x8D40
+#define GL_READ_FRAMEBUFFER_ENUM		0x8CA8
+#define GL_DRAW_FRAMEBUFFER_ENUM		0x8CA9
+#define GL_READ_FRAMEBUFFER_BINDING_ENUM	0x8CAA
+#define GL_DRAW_FRAMEBUFFER_BINDING_ENUM	0x8CA6
+#define GL_COLOR_ATTACHMENT0_ENUM		0x8CE0
+#define GL_FRAMEBUFFER_COMPLETE_ENUM		0x8CD5
+#define GL_IMPLEMENTATION_COLOR_READ_TYPE_ENUM	0x8B9A
+#define GL_IMPLEMENTATION_COLOR_READ_FORMAT_ENUM	0x8B9B
+
 static int failures = 0;
 static int checks = 0;
 static int es3 = 0;
@@ -43,39 +73,56 @@ typedef struct Format
 	const char *name;
 	int32_t texelBytes;
 	/* The texel bytes come back as uploaded (not for the signed formats, which FNA3D stores in
-	 * unsigned normalized textures; on ES 3 only RGBA8 and the float formats are certain to be
-	 * readable, any other one is read exactly or refused -- sRGB always refused, as ES 3 decodes
-	 * it to linear when it reads it). */
+	 * unsigned normalized textures). On ES 3 RGBA8, sRGB RGBA8 and the float formats are always
+	 * read; any other format exactly when the implementation reads the level in the format's own
+	 * layout (glFormat/glType), and is refused otherwise -- see Readable(). */
 	uint8_t exactRoundTrip;
 	/* A float format, read back on ES 3 too. */
 	uint8_t isFloat;
 	/* Halves rather than floats. */
 	uint8_t isHalf;
+	/* The texels' own GL layout, as FNA3D uploads them. */
+	uint32_t glFormat;
+	uint32_t glType;
 } Format;
 
 static const Format formats[] =
 {
-	{ FNA3D_SURFACEFORMAT_COLOR,		"Color",		4, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_BGR565,		"Bgr565",		2, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_BGRA5551,		"Bgra5551",		2, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_BGRA4444,		"Bgra4444",		2, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_NORMALIZEDBYTE2,	"NormalizedByte2",	2, 0, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_NORMALIZEDBYTE4,	"NormalizedByte4",	4, 0, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_RGBA1010102,	"Rgba1010102",		4, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_RG32,		"Rg32",			4, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_RGBA64,		"Rgba64",		8, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_ALPHA8,		"Alpha8",		1, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_SINGLE,		"Single",		4, 1, 1, 0 },
-	{ FNA3D_SURFACEFORMAT_VECTOR2,		"Vector2",		8, 1, 1, 0 },
-	{ FNA3D_SURFACEFORMAT_VECTOR4,		"Vector4",		16, 1, 1, 0 },
-	{ FNA3D_SURFACEFORMAT_HALFSINGLE,	"HalfSingle",		2, 1, 1, 1 },
-	{ FNA3D_SURFACEFORMAT_HALFVECTOR2,	"HalfVector2",		4, 1, 1, 1 },
-	{ FNA3D_SURFACEFORMAT_HALFVECTOR4,	"HalfVector4",		8, 1, 1, 1 },
-	{ FNA3D_SURFACEFORMAT_HDRBLENDABLE,	"HdrBlendable",		8, 1, 1, 1 },
-	{ FNA3D_SURFACEFORMAT_COLORBGRA_EXT,	"ColorBgraEXT",		4, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_COLORSRGB_EXT,	"ColorSrgbEXT",		4, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_BYTE_EXT,		"ByteEXT",		1, 1, 0, 0 },
-	{ FNA3D_SURFACEFORMAT_USHORT_EXT,	"UShortEXT",		2, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_COLOR,		"Color",		4, 1, 0, 0,
+	  GL_RGBA_ENUM, GL_UNSIGNED_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_BGR565,		"Bgr565",		2, 1, 0, 0,
+	  GL_RGB_ENUM, GL_UNSIGNED_SHORT_5_6_5_ENUM },
+	{ FNA3D_SURFACEFORMAT_BGRA5551,		"Bgra5551",		2, 1, 0, 0,
+	  GL_BGRA_ENUM, GL_UNSIGNED_SHORT_1_5_5_5_REV_ENUM },
+	{ FNA3D_SURFACEFORMAT_BGRA4444,		"Bgra4444",		2, 1, 0, 0,
+	  GL_BGRA_ENUM, GL_UNSIGNED_SHORT_4_4_4_4_REV_ENUM },
+	{ FNA3D_SURFACEFORMAT_NORMALIZEDBYTE2,	"NormalizedByte2",	2, 0, 0, 0,
+	  GL_RG_ENUM, GL_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_NORMALIZEDBYTE4,	"NormalizedByte4",	4, 0, 0, 0,
+	  GL_RGBA_ENUM, GL_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_RGBA1010102,	"Rgba1010102",		4, 1, 0, 0,
+	  GL_RGBA_ENUM, GL_UNSIGNED_INT_2_10_10_10_REV_ENUM },
+	{ FNA3D_SURFACEFORMAT_RG32,		"Rg32",			4, 1, 0, 0,
+	  GL_RG_ENUM, GL_UNSIGNED_SHORT_ENUM },
+	{ FNA3D_SURFACEFORMAT_RGBA64,		"Rgba64",		8, 1, 0, 0,
+	  GL_RGBA_ENUM, GL_UNSIGNED_SHORT_ENUM },
+	{ FNA3D_SURFACEFORMAT_ALPHA8,		"Alpha8",		1, 1, 0, 0,
+	  GL_ALPHA_ENUM, GL_UNSIGNED_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_SINGLE,		"Single",		4, 1, 1, 0, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_VECTOR2,		"Vector2",		8, 1, 1, 0, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_VECTOR4,		"Vector4",		16, 1, 1, 0, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_HALFSINGLE,	"HalfSingle",		2, 1, 1, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_HALFVECTOR2,	"HalfVector2",		4, 1, 1, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_HALFVECTOR4,	"HalfVector4",		8, 1, 1, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_HDRBLENDABLE,	"HdrBlendable",		8, 1, 1, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_COLORBGRA_EXT,	"ColorBgraEXT",		4, 1, 0, 0,
+	  GL_BGRA_ENUM, GL_UNSIGNED_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_COLORSRGB_EXT,	"ColorSrgbEXT",		4, 1, 0, 0,
+	  GL_RGBA_ENUM, GL_UNSIGNED_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_BYTE_EXT,		"ByteEXT",		1, 1, 0, 0,
+	  GL_RED_ENUM, GL_UNSIGNED_BYTE_ENUM },
+	{ FNA3D_SURFACEFORMAT_USHORT_EXT,	"UShortEXT",		2, 1, 0, 0,
+	  GL_RED_ENUM, GL_UNSIGNED_SHORT_ENUM },
 };
 
 /* Distinct, finite, exactly representable values: halves 1.0 + n/1024, floats 1.0 + n/2^20, and
@@ -156,12 +203,106 @@ static void SetPackAlignment(int32_t alignment)
 	}
 }
 
-/* Whether this context is certain to read the format back (ES 3 reads RGBA8 and the float
- * formats; any other format only when the implementation's own read layout is the format's, and
- * is refused otherwise). */
-static int Readable(const Format *format)
+static void *GLFunction(const char *name)
 {
-	return !es3 || format->isFloat || (format->format == FNA3D_SURFACEFORMAT_COLOR);
+	void *function = (void*) SDL_GL_GetProcAddress(name);
+	if (function == NULL)
+	{
+		fprintf(stderr, "no %s in this GL context\n", name);
+		exit(1);
+	}
+	return function;
+}
+
+static int32_t GLInteger(uint32_t name)
+{
+	typedef void (*GetIntegerv)(uint32_t, int32_t*);
+	GetIntegerv getIntegerv = (GetIntegerv) GLFunction("glGetIntegerv");
+	int32_t value = 0;
+	getIntegerv(name, &value);
+	return value;
+}
+
+/* OpenGL ES 3 only: the GL name of the texture FNA3D left bound to unit 0 for a binding point,
+ * as each of its SetTextureData and CreateTexture calls leaves it.
+ */
+static uint32_t BoundTexture(uint32_t bindingName)
+{
+	if (!es3)
+	{
+		return 0;
+	}
+	if (GLInteger(GL_ACTIVE_TEXTURE_ENUM) != GL_TEXTURE0_ENUM)
+	{
+		fprintf(stderr, "FNA3D left texture unit %d active, not 0\n",
+			GLInteger(GL_ACTIVE_TEXTURE_ENUM) - GL_TEXTURE0_ENUM);
+		exit(1);
+	}
+	return (uint32_t) GLInteger(bindingName);
+}
+
+/* Whether this context must read the level back. Always, but on OpenGL ES 3 -- which has no
+ * glGetTexImage, so GetData attaches the level and glReadPixels it -- only RGBA8, sRGB RGBA8 and
+ * the float formats are always readable (as RGBA/UNSIGNED_BYTE and RGBA/FLOAT, ES 3.2 section
+ * 16.1.2); any other format must be read when the implementation's own pair for the attached
+ * level, GL_IMPLEMENTATION_COLOR_READ_FORMAT/TYPE, is the format's layout, and refused when it is
+ * not, or when the level is no complete colour attachment. The pair is asked of the level
+ * attached to a framebuffer of the test's own; FNA3D's framebuffer bindings are restored.
+ */
+static int Readable(const Format *format, uint32_t texture, uint32_t imageTarget, int32_t level)
+{
+	typedef void (*GenFramebuffers)(int32_t, uint32_t*);
+	typedef void (*BindFramebuffer)(uint32_t, uint32_t);
+	typedef void (*FramebufferTexture2D)(uint32_t, uint32_t, uint32_t, uint32_t, int32_t);
+	typedef uint32_t (*CheckFramebufferStatus)(uint32_t);
+	typedef uint32_t (*GetError)(void);
+	GenFramebuffers genFramebuffers;
+	GenFramebuffers deleteFramebuffers;
+	BindFramebuffer bindFramebuffer;
+	FramebufferTexture2D framebufferTexture2D;
+	CheckFramebufferStatus checkFramebufferStatus;
+	GetError getError;
+	uint32_t framebuffer = 0;
+	int32_t previousRead, previousDraw;
+	int32_t readFormat = 0, readType = 0;
+	int complete;
+
+	if (	!es3 ||
+		format->isFloat ||
+		format->format == FNA3D_SURFACEFORMAT_COLOR ||
+		format->format == FNA3D_SURFACEFORMAT_COLORSRGB_EXT	)
+	{
+		return 1;
+	}
+	genFramebuffers = (GenFramebuffers) GLFunction("glGenFramebuffers");
+	deleteFramebuffers = (GenFramebuffers) GLFunction("glDeleteFramebuffers");
+	bindFramebuffer = (BindFramebuffer) GLFunction("glBindFramebuffer");
+	framebufferTexture2D = (FramebufferTexture2D) GLFunction("glFramebufferTexture2D");
+	checkFramebufferStatus = (CheckFramebufferStatus) GLFunction("glCheckFramebufferStatus");
+	getError = (GetError) GLFunction("glGetError");
+
+	previousRead = GLInteger(GL_READ_FRAMEBUFFER_BINDING_ENUM);
+	previousDraw = GLInteger(GL_DRAW_FRAMEBUFFER_BINDING_ENUM);
+	genFramebuffers(1, &framebuffer);
+	bindFramebuffer(GL_FRAMEBUFFER_ENUM, framebuffer);
+	framebufferTexture2D(GL_FRAMEBUFFER_ENUM, GL_COLOR_ATTACHMENT0_ENUM, imageTarget, texture,
+			     level);
+	complete = checkFramebufferStatus(GL_FRAMEBUFFER_ENUM) == GL_FRAMEBUFFER_COMPLETE_ENUM;
+	if (complete)
+	{
+		readFormat = GLInteger(GL_IMPLEMENTATION_COLOR_READ_FORMAT_ENUM);
+		readType = GLInteger(GL_IMPLEMENTATION_COLOR_READ_TYPE_ENUM);
+	}
+	bindFramebuffer(GL_READ_FRAMEBUFFER_ENUM, (uint32_t) previousRead);
+	bindFramebuffer(GL_DRAW_FRAMEBUFFER_ENUM, (uint32_t) previousDraw);
+	deleteFramebuffers(1, &framebuffer);
+	while (getError() != 0)
+	{
+		/* Leave FNA3D no error of the test's. */
+	}
+	return	complete &&
+		(uint32_t) readFormat == format->glFormat &&
+		(uint32_t) readType == format->glType;
 }
 
 static int Untouched(const uint8_t *buffer, size_t bytes)
@@ -174,6 +315,7 @@ static int Untouched(const uint8_t *buffer, size_t bytes)
 static void CheckRead2D(
 	FNA3D_Device *device,
 	FNA3D_Texture *texture,
+	uint32_t glTexture,
 	const Format *format,
 	int32_t level,
 	int32_t levelWidth,
@@ -186,15 +328,19 @@ static void CheckRead2D(
 ) {
 	const size_t bytes = (size_t) w * (size_t) h * (size_t) format->texelBytes;
 	uint8_t *buffer = GuardedBuffer(bytes);
+	const int readable = Readable(format, glTexture, GL_TEXTURE_2D_ENUM, level);
 	int32_t row;
 
 	FNA3D_GetTextureData2D(device, texture, x, y, w, h, level, buffer, (int32_t) bytes);
 	CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 		"%s %s level %d (%d,%d %dx%d): wrote past %zu bytes",
 		what, format->name, level, x, y, w, h, bytes);
-	if (format->exactRoundTrip && !Readable(format) && Untouched(buffer, bytes))
+	if (!readable)
 	{
-		/* ES 3 refused a layout it cannot return; nothing was written. */
+		CHECK(Untouched(buffer, bytes),
+			"%s %s level %d (%d,%d %dx%d): OpenGL ES 3 reads it in another layout, "
+			"but GetData wrote the destination",
+			what, format->name, level, x, y, w, h);
 	}
 	else if (format->exactRoundTrip)
 	{
@@ -219,6 +365,7 @@ static void TestTexture2D(FNA3D_Device *device, const Format *format, int32_t wi
 	FNA3D_Texture *texture = FNA3D_CreateTexture2D(device, format->format, width, height,
 						       levels, 0);
 	uint8_t *uploads[16];
+	uint32_t glTexture;
 	int32_t level;
 	char what[64];
 
@@ -233,17 +380,19 @@ static void TestTexture2D(FNA3D_Device *device, const Format *format, int32_t wi
 		FNA3D_SetTextureData2D(device, texture, 0, 0, w, h, level, uploads[level],
 				       (int32_t) bytes);
 	}
+	glTexture = BoundTexture(GL_TEXTURE_BINDING_2D_ENUM);
 	for (level = 0; level < levels; level += 1)
 	{
 		const int32_t w = MipSize(width, level);
 		const int32_t h = MipSize(height, level);
-		CheckRead2D(device, texture, format, level, w, uploads[level], 0, 0, w, h, what);
+		CheckRead2D(device, texture, glTexture, format, level, w, uploads[level],
+			    0, 0, w, h, what);
 		if (w > 1 && h > 1)
 		{
-			CheckRead2D(device, texture, format, level, w, uploads[level],
+			CheckRead2D(device, texture, glTexture, format, level, w, uploads[level],
 				    1, 1, w - 1, h - 1, what);
 		}
-		CheckRead2D(device, texture, format, level, w, uploads[level],
+		CheckRead2D(device, texture, glTexture, format, level, w, uploads[level],
 			    w - 1, h - 1, 1, 1, what);
 	}
 	if (SDL_GL_GetCurrentContext() != NULL) /* only the OpenGL driver has pixel-store state */
@@ -270,18 +419,28 @@ static void TestCube(FNA3D_Device *device, const Format *format, int32_t size, i
 			const size_t bytes = (size_t) s * (size_t) s * (size_t) format->texelBytes;
 			uint8_t *uploaded = (uint8_t*) malloc(bytes);
 			uint8_t *buffer = GuardedBuffer(bytes);
+			int readable;
 			FillPattern(format, uploaded, bytes, (uint32_t) (face * 13 + level));
 			FNA3D_SetTextureDataCube(device, texture, 0, 0, s, s,
 						 (FNA3D_CubeMapFace) face, level, uploaded,
 						 (int32_t) bytes);
+			readable = Readable(format, BoundTexture(GL_TEXTURE_BINDING_CUBE_MAP_ENUM),
+					    GL_TEXTURE_CUBE_MAP_POSITIVE_X_ENUM + (uint32_t) face,
+					    level);
 			FNA3D_GetTextureDataCube(device, texture, 0, 0, s, s,
 						 (FNA3D_CubeMapFace) face, level, buffer,
 						 (int32_t) bytes);
 			CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 				"cube %d %s face %d level %d: wrote past %zu bytes",
 				size, format->name, face, level, bytes);
-			if (	format->exactRoundTrip &&
-				(Readable(format) || !Untouched(buffer, bytes))	)
+			if (!readable)
+			{
+				CHECK(Untouched(buffer, bytes),
+					"cube %d %s face %d level %d: OpenGL ES 3 reads it in another "
+					"layout, but GetData wrote the destination",
+					size, format->name, face, level);
+			}
+			else if (format->exactRoundTrip)
 			{
 				CHECK(memcmp(uploaded, buffer, bytes) == 0,
 					"cube %d %s face %d level %d: differs from the upload",
@@ -333,17 +492,21 @@ static void TestVolume(FNA3D_Device *device, const Format *format, int32_t size,
 /* A render target still attached to the framebuffer: the path that read RGBA8 regardless.
  *
  * The target is cleared to (0.25, 0.5, 0.75, 1); where that colour has one encoding -- RGBA8 and
- * BGRA8 to within rounding, the float and half formats exactly -- the texels must hold it, and
- * any other format must at least have been written, uniformly, so that a read which does nothing
- * fails instead of passing on the untouched destination. On ES 3 a format it is not certain to
- * read may be refused, leaving the destination untouched.
+ * BGRA8 to within rounding, sRGB RGBA8 sRGB-encoded to within rounding where the target encodes
+ * (always on ES 3; elsewhere where FNA3D reports sRGB render targets), the float and half formats
+ * exactly -- the texels must hold it, and any other format must at least have been written,
+ * uniformly, so that a read which does nothing fails instead of passing on the untouched
+ * destination. On ES 3 a format the implementation does not read in its own layout must be
+ * refused, leaving the destination untouched (Readable()).
  */
-static int ExpectedClear(const Format *format, uint8_t *expected, int *tolerance)
+static int ExpectedClear(const Format *format, int encodesSrgb, uint8_t *expected,
+			 int *tolerance)
 {
 	const float floats[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
 	const uint16_t halves[4] = { 0x3400, 0x3800, 0x3A00, 0x3C00 };
 	const uint8_t rgba[4] = { 64, 128, 191, 255 };
 	const uint8_t bgra[4] = { 191, 128, 64, 255 };
+	const uint8_t srgb[4] = { 137, 188, 225, 255 };
 
 	*tolerance = 0;
 	if (format->isFloat && format->isHalf)
@@ -368,6 +531,12 @@ static int ExpectedClear(const Format *format, uint8_t *expected, int *tolerance
 		*tolerance = 1;
 		return 1;
 	}
+	if (format->format == FNA3D_SURFACEFORMAT_COLORSRGB_EXT && encodesSrgb)
+	{
+		memcpy(expected, srgb, 4);
+		*tolerance = 1;
+		return 1;
+	}
 	return 0;
 }
 
@@ -379,6 +548,9 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 	FNA3D_RenderTargetBinding binding;
 	FNA3D_Vec4 color = { 0.25f, 0.5f, 0.75f, 1.0f };
 	uint8_t *buffer = GuardedBuffer(bytes);
+	const int readable = Readable(format, BoundTexture(GL_TEXTURE_BINDING_2D_ENUM),
+				      GL_TEXTURE_2D_ENUM, 0);
+	const int encodesSrgb = es3 || FNA3D_SupportsSRGBRenderTargets(device);
 	uint8_t expected[16];
 	int tolerance = 0;
 	size_t texel, i;
@@ -394,9 +566,11 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 	FNA3D_GetTextureData2D(device, texture, 0, 0, width, height, 0, buffer, (int32_t) bytes);
 	CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 		"attached target %s: wrote past %zu bytes", format->name, bytes);
-	if (!Readable(format) && Untouched(buffer, bytes))
+	if (!readable)
 	{
-		/* ES 3 refused a layout it cannot return. */
+		CHECK(Untouched(buffer, bytes),
+			"attached target %s: OpenGL ES 3 reads it in another layout, "
+			"but GetData wrote the destination", format->name);
 	}
 	else
 	{
@@ -409,7 +583,7 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 				"attached target %s: texel %zu differs from texel 0",
 				format->name, texel);
 		}
-		if (ExpectedClear(format, expected, &tolerance))
+		if (ExpectedClear(format, encodesSrgb, expected, &tolerance))
 		{
 			for (i = 0; i < (size_t) format->texelBytes; i += 1)
 			{
@@ -422,6 +596,61 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 	}
 	FNA3D_SetRenderTargets(device, NULL, 0, NULL, FNA3D_DEPTHFORMAT_NONE, 0);
 	free(buffer);
+	FNA3D_AddDisposeTexture(device, texture);
+}
+
+/* A 4x multisampled target, cleared and resolved, reads back as the clear colour: RGBA8 and sRGB
+ * RGBA8, the sRGB one encoded where the target encodes. Its samples live in a renderbuffer, which
+ * OpenGL creates from the format's internal format -- an unsized GL_SRGB_ALPHA_EXT, which no
+ * renderbuffer takes (GL_INVALID_ENUM, desktop GL and ES 3 alike), left the sRGB target without
+ * storage, so nothing was cleared or resolved.
+ */
+static void TestMultisampledTarget(FNA3D_Device *device, FNA3D_SurfaceFormat surfaceFormat,
+				   const char *name)
+{
+	const int32_t width = 4, height = 2;
+	const size_t bytes = (size_t) width * height * 4;
+	FNA3D_Texture *texture = FNA3D_CreateTexture2D(device, surfaceFormat, width, height, 1, 1);
+	FNA3D_Renderbuffer *renderbuffer = FNA3D_GenColorRenderbuffer(device, width, height,
+								      surfaceFormat, 4, texture);
+	FNA3D_RenderTargetBinding binding;
+	FNA3D_Vec4 color = { 0.25f, 0.5f, 0.75f, 1.0f };
+	const int srgb = surfaceFormat == FNA3D_SURFACEFORMAT_COLORSRGB_EXT;
+	const uint8_t linear[4] = { 64, 128, 191, 255 };
+	const uint8_t encoded[4] = { 137, 188, 225, 255 };
+	const uint8_t *expected = (srgb && (es3 || FNA3D_SupportsSRGBRenderTargets(device))) ?
+		encoded : linear;
+	uint8_t *buffer = GuardedBuffer(bytes);
+	size_t i;
+
+	CHECK(renderbuffer != NULL, "4x multisampled %s target: no renderbuffer", name);
+	SDL_memset(&binding, '\0', sizeof(binding));
+	binding.type = FNA3D_RENDERTARGET_TYPE_2D;
+	binding.twod.width = width;
+	binding.twod.height = height;
+	binding.levelCount = 1;
+	binding.multiSampleCount = 4;
+	binding.texture = texture;
+	binding.colorBuffer = renderbuffer;
+	FNA3D_SetRenderTargets(device, &binding, 1, NULL, FNA3D_DEPTHFORMAT_NONE, 0);
+	FNA3D_Clear(device, FNA3D_CLEAROPTIONS_TARGET, &color, 0.0f, 0);
+	FNA3D_SetRenderTargets(device, NULL, 0, NULL, FNA3D_DEPTHFORMAT_NONE, 0);
+	FNA3D_ResolveTarget(device, &binding);
+	FNA3D_GetTextureData2D(device, texture, 0, 0, width, height, 0, buffer, (int32_t) bytes);
+	CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
+		"4x multisampled %s target: wrote past %zu bytes", name, bytes);
+	for (i = 0; i < bytes; i += 1)
+	{
+		const int difference = (int) buffer[i] - (int) expected[i % 4];
+		if (difference < -1 || difference > 1)
+		{
+			CHECK(0, "4x multisampled %s target: byte %zu is %d, the clear colour gives %d",
+			      name, i, buffer[i], expected[i % 4]);
+			break;
+		}
+	}
+	free(buffer);
+	FNA3D_AddDisposeRenderbuffer(device, renderbuffer);
 	FNA3D_AddDisposeTexture(device, texture);
 }
 
@@ -656,6 +885,8 @@ int main(int argc, char **argv)
 		TestVolume(device, format, 5, 2, 3);
 		TestAttachedTarget(device, format);
 	}
+	TestMultisampledTarget(device, FNA3D_SURFACEFORMAT_COLOR, "Color");
+	TestMultisampledTarget(device, FNA3D_SURFACEFORMAT_COLORSRGB_EXT, "ColorSrgbEXT");
 	TestRefusals(device);
 	TestCompressedReadback(device);
 	TestForeignPackAlignment(device);
