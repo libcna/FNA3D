@@ -6,7 +6,10 @@
 #      each right after its string marker, with its arguments (B2 B-09: they were not traced).
 #   2. fna3d_replay replays it with fna3d_cna_trace_interposer preloaded, which logs what the
 #      replay hands FNA3D_SetXnaPixelCenterEXT and FNA3D_SetLegacyBumpMapEnvEXT; the log must be
-#      exactly the captured calls (B2 B-09: replay did not know the marks). Under AddressSanitizer
+#      exactly the captured calls (B2 B-09: replay did not know the marks). Where no interposer
+#      can see those calls (INTERPOSER empty: a static FNA3D, or no LD_PRELOAD; INTERPOSER_SKIPPED
+#      says which), the replay runs without it -- a mark it did not know still fails it -- and the
+#      log comparison is skipped. Under AddressSanitizer
 #      the replay runs with detect_stack_use_after_return=1, which catches the second frame's
 #      pass change writing through the first frame's state-change record (B1 B-01: replay kept it
 #      in a frame-local variable); without AddressSanitizer that write lands, harmlessly, in the
@@ -19,7 +22,7 @@
 #
 # This file is part of the libcna fork of FNA3D; see tests/cna/README.md.
 
-foreach(variable BUILD_DIR WORK_DIR RECORD REPLAY INTERPOSER)
+foreach(variable BUILD_DIR WORK_DIR RECORD REPLAY)
 	if(NOT DEFINED ${variable} OR "${${variable}}" STREQUAL "")
 		message(FATAL_ERROR "trace_tests.cmake: ${variable} is not set")
 	endif()
@@ -72,8 +75,10 @@ if(NOT ASAN)
 		"state-change record (B1 B-01) cannot show")
 endif()
 set(ENV{ASAN_OPTIONS} "${REPLAY_ASAN_OPTIONS}")
-set(ENV{LD_PRELOAD} "${INTERPOSER}")
-set(ENV{FNA3D_CNA_TRACE_LOG} "${WORK_DIR}/replay-calls.log")
+if(DEFINED INTERPOSER AND NOT INTERPOSER STREQUAL "")
+	set(ENV{LD_PRELOAD} "${INTERPOSER}")
+	set(ENV{FNA3D_CNA_TRACE_LOG} "${WORK_DIR}/replay-calls.log")
+endif()
 run("replay" "${REPLAY}" "${TRACE}")
 unset(ENV{LD_PRELOAD})
 unset(ENV{FNA3D_CNA_TRACE_LOG})
@@ -88,7 +93,10 @@ set(REPLAYED_CALLS "")
 if(EXISTS "${WORK_DIR}/replay-calls.log")
 	file(READ "${WORK_DIR}/replay-calls.log" REPLAYED_CALLS)
 endif()
-if(REPLAYED_CALLS STREQUAL EXPECTED_CALLS)
+if(NOT DEFINED INTERPOSER OR INTERPOSER STREQUAL "")
+	message(STATUS "replayed extension calls: SKIPPED, no interposer can observe them -- "
+		"${INTERPOSER_SKIPPED}")
+elseif(REPLAYED_CALLS STREQUAL EXPECTED_CALLS)
 	message(STATUS "replayed extension calls: ok\n${REPLAYED_CALLS}")
 else()
 	message(STATUS "replayed extension calls: FAILED, expected\n${EXPECTED_CALLS}got\n${REPLAYED_CALLS}")

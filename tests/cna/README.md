@@ -60,7 +60,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   effect, then a Depth vertex element in Byte4 -- and finds each extension record, with its
   arguments, after its marker. `fna3d_replay` replays the trace with `trace_interposer.c`
   preloaded, which logs what it hands the two extension entry points; the log must be the
-  captured calls. Under AddressSanitizer the replay runs with `detect_stack_use_after_return=1`,
+  captured calls. The interposer is built only where it can see those calls -- a shared FNA3D
+  on a platform whose loader takes `LD_PRELOAD` and has `dlfcn.h`; elsewhere (a static FNA3D,
+  Windows, macOS) the replay runs without it and the log comparison is reported as skipped, with
+  the reason. Under AddressSanitizer the replay runs with `detect_stack_use_after_return=1`,
   which catches a pass change writing through a dead frame's state-change record; without it that
   write cannot show. `fna3d_dumpspirv` then dumps the trace and `spirv_check.c`, linking the same
   shaders through libFNA3D's MojoShader, finds the Depth element linked as DEPTH, not as

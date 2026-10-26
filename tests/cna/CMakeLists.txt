@@ -201,8 +201,29 @@ if(TRACING_SUPPORT AND TARGET fna3d_replay)
 		"${CMAKE_CURRENT_SOURCE_DIR}/../../include"
 		"${CMAKE_CURRENT_SOURCE_DIR}/../../MojoShader"
 	)
-	add_library(fna3d_cna_trace_interposer MODULE trace_interposer.c)
-	target_link_libraries(fna3d_cna_trace_interposer PRIVATE ${CMAKE_DL_LIBS})
+	# The replay's extension calls are observed by an LD_PRELOAD interposer (dlfcn's RTLD_NEXT),
+	# which sees them only where fna3d_replay calls a shared libFNA3D through the dynamic linker
+	# and the loader honours LD_PRELOAD. Elsewhere the replay still runs, and the call-log
+	# comparison is skipped, saying why.
+	include(CheckIncludeFile)
+	check_include_file(dlfcn.h FNA3D_CNA_HAVE_DLFCN_H)
+	set(FNA3D_CNA_INTERPOSER "")
+	set(FNA3D_CNA_INTERPOSER_SKIPPED "")
+	if(NOT BUILD_SHARED_LIBS)
+		set(FNA3D_CNA_INTERPOSER_SKIPPED "FNA3D is a static library, so fna3d_replay calls it directly")
+	elseif(NOT UNIX OR APPLE OR EMSCRIPTEN)
+		set(FNA3D_CNA_INTERPOSER_SKIPPED "this platform's loader has no LD_PRELOAD")
+	elseif(NOT FNA3D_CNA_HAVE_DLFCN_H)
+		set(FNA3D_CNA_INTERPOSER_SKIPPED "there is no dlfcn.h")
+	else()
+		add_library(fna3d_cna_trace_interposer MODULE trace_interposer.c)
+		target_link_libraries(fna3d_cna_trace_interposer PRIVATE ${CMAKE_DL_LIBS})
+		set(FNA3D_CNA_INTERPOSER "$<TARGET_FILE:fna3d_cna_trace_interposer>")
+	endif()
+	if(NOT FNA3D_CNA_INTERPOSER_SKIPPED STREQUAL "")
+		message(STATUS "tests/cna: fna3d_cna_trace_* replay without the call-log interposer: "
+			"${FNA3D_CNA_INTERPOSER_SKIPPED}")
+	endif()
 	if(TARGET SDL3::SDL3)
 		target_link_libraries(fna3d_cna_trace_record PRIVATE SDL3::SDL3)
 	endif()
@@ -240,7 +261,8 @@ if(TRACING_SUPPORT AND TARGET fna3d_replay)
 			"-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/trace-${variant}"
 			"-DRECORD=$<TARGET_FILE:fna3d_cna_trace_record>"
 			"-DREPLAY=$<TARGET_FILE:fna3d_replay>"
-			"-DINTERPOSER=$<TARGET_FILE:fna3d_cna_trace_interposer>"
+			"-DINTERPOSER=${FNA3D_CNA_INTERPOSER}"
+			"-DINTERPOSER_SKIPPED=${FNA3D_CNA_INTERPOSER_SKIPPED}"
 			"-DDUMPSPIRV=${FNA3D_CNA_DUMPSPIRV}"
 			"-DSPIRV_CHECK=${FNA3D_CNA_SPIRV_CHECK}"
 			"-DASAN=${FNA3D_CNA_ASAN}"
