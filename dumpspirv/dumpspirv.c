@@ -346,6 +346,8 @@ static inline MOJOSHADER_usage VertexAttribUsage(
 			return MOJOSHADER_USAGE_SAMPLE;
 		case FNA3D_VERTEXELEMENTUSAGE_TESSELATEFACTOR:
 			return MOJOSHADER_USAGE_TESSFACTOR;
+		case FNA3D_VERTEXELEMENTUSAGE_DEPTH:
+			return MOJOSHADER_USAGE_DEPTH;
 		default:
 			SDL_assert(!"Unrecognized VertexElementUsage!");
 			return (MOJOSHADER_usage) 0;
