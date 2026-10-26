@@ -269,6 +269,22 @@ if(BUILD_SHARED_LIBS)
 		DIRECTORY include/
 		DESTINATION ${FNA3D_INSTALL_INCLUDEDIR}
 	)
+	# CNA: FNA3D.h's Effect API is declared in MojoShader's types, and only the mojoshader.h
+	# FNA3D was built with describes them (this fork's records differ from upstream MojoShader's).
+	# It goes in a directory of its own, searched before the one holding FNA3D.h, so that neither
+	# an unrelated mojoshader.h is found for FNA3D nor this one for an unrelated MojoShader user;
+	# the definitions FNA3D compiled it with are published along with it.
+	install(
+		FILES MojoShader/mojoshader.h
+		DESTINATION ${FNA3D_INSTALL_INCLUDEDIR}/FNA3D
+	)
+	target_include_directories(FNA3D INTERFACE
+		"$<INSTALL_INTERFACE:${FNA3D_INSTALL_INCLUDEDIR}/FNA3D>"
+	)
+	target_compile_definitions(FNA3D INTERFACE
+		"$<INSTALL_INTERFACE:MOJOSHADER_NO_VERSION_INCLUDE>"
+		"$<INSTALL_INTERFACE:MOJOSHADER_EFFECT_SUPPORT>"
+	)
 	# Libraries...
 	install(
 		TARGETS ${PROJECT_NAME}
