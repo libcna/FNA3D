@@ -355,7 +355,7 @@ static LPCSTR XNAToD3D_VertexAttribSemanticName[] =
 	"TANGENT",			/* VertexElementUsage.Tangent */
 	"BLENDINDICES",			/* VertexElementUsage.BlendIndices */
 	"BLENDWEIGHT",			/* VertexElementUsage.BlendWeight */
-	"SV_DEPTH",			/* VertexElementUsage.Depth */
+	"DEPTH",			/* VertexElementUsage.Depth -- CNA: SV_DEPTH is a pixel output, refused here */
 	"FOG",				/* VertexElementUsage.Fog */
 	"PSIZE",			/* VertexElementUsage.PointSize */
 	"SV_SampleIndex",		/* VertexElementUsage.Sample */
