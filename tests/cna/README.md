@@ -16,3 +16,13 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   thread wait for the next `SwapBuffers`; destroying the device first must still free them, and
   the device its own caches. The test counts live SDL allocations through `SDL_SetMemoryFunctions`
   around a device's lifetime, on OpenGL, OpenGL ES 3 and the SDL_GPU driver.
+- `backbuffer_tests.c`: `ReadBackbuffer` returns the rectangle asked for, in the backbuffer's
+  top-left origin. Every pixel is painted its own colour (row and half) by drawing through a
+  scissor rectangle per row half, the scissor test left on as a draw leaves it; full and
+  asymmetric partial reads must then hold exactly those colours in order and write nothing past
+  `w * h * 4` bytes -- on a window-sized backbuffer, a smaller faux one and 4x multisampled ones,
+  whose resolve the scissor must not clip.
+- `test_effect.h`: the minimal Effect the drawing tests use, built in memory from the Effects
+  Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
+  its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
+  up to four passes.
