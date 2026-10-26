@@ -133,6 +133,34 @@ if(BUILD_SHARED_LIBS)
 	)
 endif()
 
+# MOJOSHADER_STATIC_SPIRVCROSS, configured against a stand-in static SDL3_shadercross package
+# (static_shadercross.cmake, static_shadercross/), must select MojoShader's statically linked
+# path, link the archive into libFNA3D and link the C++ runtime it needs. No display. It builds
+# FNA3D once more inside its work directory (incrementally after the first run), so it needs a
+# C++ compiler; registered for GCC- or Clang-style toolchains on Linux-like systems, as it links
+# its C client with -L, -l and an rpath.
+include(CheckLanguage)
+check_language(CXX)
+if(	UNIX AND NOT APPLE AND NOT EMSCRIPTEN AND
+	CMAKE_CXX_COMPILER AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang"	)
+	add_test(NAME fna3d_cna_static_shadercross COMMAND "${CMAKE_COMMAND}"
+		"-DFNA3D_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+		"-DFNA3D_BUILD_DIR=${PROJECT_BINARY_DIR}"
+		"-DWORK_DIR=${PROJECT_BINARY_DIR}/tests/cna/static-shadercross"
+		"-DFIXTURE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/static_shadercross"
+		"-DC_COMPILER=${CMAKE_C_COMPILER}"
+		"-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
+		"-DC_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}"
+		"-DCXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}"
+		"-DGENERATOR=${CMAKE_GENERATOR}"
+		"-DSDL3_DIR=${SDL3_DIR}"
+		-P "${CMAKE_CURRENT_SOURCE_DIR}/static_shadercross.cmake"
+	)
+else()
+	message(STATUS "tests/cna: fna3d_cna_static_shadercross is not registered "
+		"(it needs a C++ compiler and a GCC- or Clang-style toolchain on a Linux-like system)")
+endif()
+
 # replay.c must compile against SDL 2 as well (BUILD_SDL3=OFF, TRACING_SUPPORT=ON), with the
 # definitions such a configuration gives it: this directory's, without the SDL 3 ones, plus
 # FNA3D_TRACING. A syntax check at C99 and C17 (C23 would make `true` a keyword); registered only

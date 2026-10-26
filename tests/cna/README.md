@@ -55,6 +55,18 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   The configuration ctest runs (`-C`, which a multi-config tree such as Ninja Multi-Config needs)
   is the one installed and built, and the consumer names its own executable's path.
   Registered only with `BUILD_SHARED_LIBS`, as only a shared FNA3D installs.
+- `static_shadercross.cmake` (no display; `static_shadercross/`): `MOJOSHADER_STATIC_SPIRVCROSS`
+  against a stand-in static `SDL3_shadercross` package, installed from `static_shadercross/` --
+  a C archive with the `SDL_ShaderCross_*` functions linking, through `$<LINK_ONLY:>`, a C++
+  archive in place of SPIRV-Cross. FNA3D's own source is configured with the option against it
+  and its library built and installed (in the test's work directory, incrementally after the
+  first run): `mojoshader_sdlgpu.c` must be compiled with
+  `CNA_MOJOSHADER_SDL_GPU_SHADERCROSS_STATIC`, and a C client linked by the C driver must link,
+  load and see the stand-in's DXBC and METALLIB in `MOJOSHADER_sdlGetShaderFormats()` -- which
+  takes the archive called from inside libFNA3D and the C++ runtime linked into it. It proves
+  FNA3D's selector and linkage, not the real package (whose config also asks for SPIRV-Cross's
+  packages and DirectXShaderCompiler) or any translation. Registered for GCC/Clang on Linux-like
+  systems with a C++ compiler.
 - `fna3d_cna_replay_sdl2_gnu99`/`_gnu17` (no display, `CMakeLists.txt` only): `replay/replay.c`
   must compile against SDL 2, as `BUILD_SDL3=OFF TRACING_SUPPORT=ON` builds it -- a
   `-fsyntax-only` check with this directory's definitions minus the SDL 3 ones, plus
