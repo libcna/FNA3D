@@ -203,6 +203,12 @@ typedef struct ReplayContext
 	uint64_t traceEffectCount;
 	FNA3D_Query **traceQuery;
 	uint64_t traceQueryCount;
+
+	/* CNA: MojoShader keeps the address an effect is applied with and writes each later pass's
+	 * state changes through it, also in a frame after the one that applied it, so it must
+	 * outlive replayOneFrame().
+	 */
+	MOJOSHADER_effectStateChanges stateChanges;
 } ReplayContext;
 
 static ReplayContext ctx;
@@ -299,7 +305,6 @@ static void replayOneFrame()
 
 	/* ApplyEffect */
 	uint32_t pass;
-	MOJOSHADER_effectStateChanges changes;
 
 	/* Miscellaneous allocations, dimensions, blah blah... */
 	int32_t x, y, z, w, h, d, level, levelCount, sizeInBytes, dataLength;
@@ -1258,7 +1263,7 @@ static void replayOneFrame()
 				ctx.device,
 				ctx.traceEffect[i],
 				pass,
-				&changes
+				&ctx.stateChanges
 			);
 			break;
 		case MARK_BEGINPASSRESTORE:
@@ -1266,7 +1271,7 @@ static void replayOneFrame()
 			FNA3D_BeginPassRestore(
 				ctx.device,
 				ctx.traceEffect[i],
-				&changes
+				&ctx.stateChanges
 			);
 			break;
 		case MARK_ENDPASSRESTORE:
