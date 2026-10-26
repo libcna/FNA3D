@@ -224,6 +224,9 @@ typedef unsigned char	GLboolean;
 #define GL_TEXTURE_LOD_BIAS				0x8501
 #define GL_UNPACK_ALIGNMENT				0x0CF5
 #define GL_PACK_ALIGNMENT				0x0D05
+#define GL_PACK_ROW_LENGTH				0x0D02
+#define GL_PACK_SKIP_ROWS				0x0D03
+#define GL_PACK_SKIP_PIXELS				0x0D04
 
 /* Multitexture */
 #define GL_TEXTURE0					0x84C0

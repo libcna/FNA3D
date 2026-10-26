@@ -3348,9 +3348,42 @@ static void OPENGL_INTERNAL_DisposeBackbuffer(OpenGLRenderer *renderer)
  * tightly packed (GL_PACK_ALIGNMENT 1: the default of 4 pads every row of an odd-width one- or
  * two-byte format past a tightly sized buffer), on a level whose size is clamped to at least one
  * texel per side exactly as creation clamps it, and only after the level, the rectangle and the
- * destination's length have been checked. The GL_PACK_ALIGNMENT a read changes goes back to its
- * default of 4, as the upload paths do with GL_UNPACK_ALIGNMENT.
+ * destination's length have been checked. The pack state a read sets -- alignment 1, no row
+ * length, no skipped rows or pixels, the tight layout every destination is sized for -- is saved
+ * first and restored afterwards, whatever another user of the context left there.
  */
+
+typedef struct OpenGLPackState
+{
+	GLint alignment;
+	GLint rowLength;
+	GLint skipRows;
+	GLint skipPixels;
+} OpenGLPackState;
+
+static OpenGLPackState OPENGL_INTERNAL_BeginTightPack(OpenGLRenderer *renderer)
+{
+	OpenGLPackState previous = { 4, 0, 0, 0 };
+	renderer->glGetIntegerv(GL_PACK_ALIGNMENT, &previous.alignment);
+	renderer->glGetIntegerv(GL_PACK_ROW_LENGTH, &previous.rowLength);
+	renderer->glGetIntegerv(GL_PACK_SKIP_ROWS, &previous.skipRows);
+	renderer->glGetIntegerv(GL_PACK_SKIP_PIXELS, &previous.skipPixels);
+	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	renderer->glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+	renderer->glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+	renderer->glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+	return previous;
+}
+
+static void OPENGL_INTERNAL_EndTightPack(
+	OpenGLRenderer *renderer,
+	const OpenGLPackState *previous
+) {
+	renderer->glPixelStorei(GL_PACK_ALIGNMENT, previous->alignment);
+	renderer->glPixelStorei(GL_PACK_ROW_LENGTH, previous->rowLength);
+	renderer->glPixelStorei(GL_PACK_SKIP_ROWS, previous->skipRows);
+	renderer->glPixelStorei(GL_PACK_SKIP_PIXELS, previous->skipPixels);
+}
 
 /* Reads a whole level with glGetTexImage (desktop GL), then copies the rectangle out of it. */
 static void OPENGL_INTERNAL_GetTexImageRect(
@@ -3372,9 +3405,10 @@ static void OPENGL_INTERNAL_GetTexImageRect(
 	uint8_t *dataPtr = (uint8_t*) data;
 	uint8_t *texData;
 	int32_t row;
+	OpenGLPackState pack;
 
 	BindTexture(renderer, texture);
-	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	pack = OPENGL_INTERNAL_BeginTightPack(renderer);
 	if (	x == 0 &&
 		y == 0 &&
 		w == levelWidth &&
@@ -3386,9 +3420,16 @@ static void OPENGL_INTERNAL_GetTexImageRect(
 	else
 	{
 		/* Get the whole texture... */
-		texData = (uint8_t*) SDL_malloc(
-			(size_t) levelWidth * (size_t) levelHeight * formatSize
-		);
+		if ((size_t) levelWidth > SDL_SIZE_MAX / (size_t) levelHeight / formatSize)
+		{
+			texData = NULL;
+		}
+		else
+		{
+			texData = (uint8_t*) SDL_malloc(
+				(size_t) levelWidth * (size_t) levelHeight * formatSize
+			);
+		}
 		if (texData == NULL)
 		{
 			FNA3D_LogError("GetData: out of memory");
@@ -3410,7 +3451,7 @@ static void OPENGL_INTERNAL_GetTexImageRect(
 			SDL_free(texData);
 		}
 	}
-	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	OPENGL_INTERNAL_EndTightPack(renderer, &pack);
 }
 
 /* IEEE 754 binary32 to binary16, round to nearest even. */
@@ -3479,6 +3520,7 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 	uint8_t ok = 0;
 	size_t texel, texels, channel;
 	float *rgba;
+	OpenGLPackState pack;
 
 	switch (texture->format)
 	{
@@ -3515,7 +3557,7 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 	}
 	else
 	{
-		renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		pack = OPENGL_INTERNAL_BeginTightPack(renderer);
 		if (texture->format == FNA3D_SURFACEFORMAT_COLOR)
 		{
 			renderer->glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
@@ -3552,7 +3594,7 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 				ok = 1;
 			}
 		}
-		renderer->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+		OPENGL_INTERNAL_EndTightPack(renderer, &pack);
 	}
 	renderer->glFramebufferTexture2D(
 		GL_FRAMEBUFFER,
@@ -3592,6 +3634,7 @@ static uint8_t OPENGL_INTERNAL_ReadBoundTarget(
 	void* data
 ) {
 	GLuint prevReadBuffer;
+	OpenGLPackState pack;
 	if (	texture->format != FNA3D_SURFACEFORMAT_COLOR ||
 		renderer->currentDrawBuffers != 1 ||
 		renderer->currentAttachments[0] != texture->handle ||
@@ -3602,9 +3645,9 @@ static uint8_t OPENGL_INTERNAL_ReadBoundTarget(
 
 	prevReadBuffer = renderer->currentReadFramebuffer;
 	BindReadFramebuffer(renderer, renderer->targetFramebuffer);
-	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	pack = OPENGL_INTERNAL_BeginTightPack(renderer);
 	renderer->glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
-	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	OPENGL_INTERNAL_EndTightPack(renderer, &pack);
 	BindReadFramebuffer(renderer, prevReadBuffer);
 	return 1;
 }
@@ -3690,6 +3733,7 @@ static void OPENGL_ReadBackbuffer(
 	GLuint prevReadBuffer, prevDrawBuffer;
 	int32_t pitch, row;
 	uint8_t *temp;
+	OpenGLPackState pack;
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	uint8_t *dataPtr = (uint8_t*) data;
 
@@ -3789,8 +3833,10 @@ static void OPENGL_ReadBackbuffer(
 	}
 
 	/* CNA: GL's origin is the bottom-left corner. The row flip below fixes the order of the
-	 * rows; the rectangle itself has to be moved to the GL rows that hold it first.
+	 * rows; the rectangle itself has to be moved to the GL rows that hold it first. The
+	 * destination holds tightly packed rows, so the read is tightly packed too.
 	 */
+	pack = OPENGL_INTERNAL_BeginTightPack(renderer);
 	renderer->glReadPixels(
 		x,
 		renderer->backbuffer->height - y - h,
@@ -3800,6 +3846,7 @@ static void OPENGL_ReadBackbuffer(
 		GL_UNSIGNED_BYTE,
 		data
 	);
+	OPENGL_INTERNAL_EndTightPack(renderer, &pack);
 
 	BindReadFramebuffer(renderer, prevReadBuffer);
 

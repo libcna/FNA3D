@@ -141,10 +141,25 @@ static int32_t PackAlignment(void)
 	return alignment;
 }
 
+static void SetPackAlignment(int32_t alignment)
+{
+	typedef void (*PixelStorei)(uint32_t, int32_t);
+	PixelStorei pixelStorei = (PixelStorei) SDL_GL_GetProcAddress("glPixelStorei");
+	if (pixelStorei != NULL)
+	{
+		pixelStorei(GL_PACK_ALIGNMENT_ENUM, alignment);
+	}
+}
+
 /* Whether this context can read the format back at all (ES 3 reads only RGBA8 and floats). */
 static int Readable(const Format *format)
 {
 	return !es3 || format->isFloat || (format->format == FNA3D_SURFACEFORMAT_COLOR);
+}
+
+static int Untouched(const uint8_t *buffer, size_t bytes)
+{
+	return GuardIntact(buffer, 0, bytes);
 }
 
 /* Reads (x, y, w, h) of one level and checks the guard, and the bytes against the uploaded level
@@ -340,6 +355,83 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 	FNA3D_AddDisposeTexture(device, texture);
 }
 
+/* OpenGL only: a read is tightly packed whatever pack alignment another user of the context left,
+ * and leaves that alignment as it found it -- a texture level, an attached target and the
+ * backbuffer, each with rows that an alignment of 8 would pad.
+ */
+static void TestForeignPackAlignment(FNA3D_Device *device)
+{
+	const Format *half = NULL;
+	FNA3D_Texture *texture;
+	FNA3D_RenderTargetBinding binding;
+	FNA3D_Vec4 color = { 0.25f, 0.5f, 0.75f, 1.0f };
+	uint8_t uploaded[12];
+	uint8_t *buffer;
+	size_t i;
+
+	if (SDL_GL_GetCurrentContext() == NULL)
+	{
+		return;
+	}
+	for (i = 0; i < SDL_arraysize(formats); i += 1)
+	{
+		if (formats[i].format == FNA3D_SURFACEFORMAT_HALFSINGLE)
+		{
+			half = &formats[i];
+		}
+	}
+
+	/* 3x2 HalfSingle: six-byte rows. */
+	texture = FNA3D_CreateTexture2D(device, half->format, 3, 2, 1, 0);
+	FillPattern(half, uploaded, sizeof(uploaded), 5);
+	FNA3D_SetTextureData2D(device, texture, 0, 0, 3, 2, 0, uploaded, sizeof(uploaded));
+	SetPackAlignment(8);
+	buffer = GuardedBuffer(sizeof(uploaded));
+	FNA3D_GetTextureData2D(device, texture, 0, 0, 3, 2, 0, buffer, sizeof(uploaded));
+	CHECK(GuardIntact(buffer, sizeof(uploaded), GUARD_BYTES),
+		"pack alignment 8: HalfSingle 3x2 read wrote past 12 bytes");
+	CHECK(memcmp(buffer, uploaded, sizeof(uploaded)) == 0,
+		"pack alignment 8: HalfSingle 3x2 read differs from the upload");
+	CHECK(PackAlignment() == 8, "pack alignment 8: texture read left it at %d", PackAlignment());
+	free(buffer);
+	FNA3D_AddDisposeTexture(device, texture);
+
+	/* 3x2 RGBA8 attached target: twelve-byte rows. */
+	texture = FNA3D_CreateTexture2D(device, FNA3D_SURFACEFORMAT_COLOR, 3, 2, 1, 1);
+	SDL_memset(&binding, '\0', sizeof(binding));
+	binding.type = FNA3D_RENDERTARGET_TYPE_2D;
+	binding.twod.width = 3;
+	binding.twod.height = 2;
+	binding.levelCount = 1;
+	binding.texture = texture;
+	FNA3D_SetRenderTargets(device, &binding, 1, NULL, FNA3D_DEPTHFORMAT_NONE, 0);
+	FNA3D_Clear(device, FNA3D_CLEAROPTIONS_TARGET, &color, 0.0f, 0);
+	SetPackAlignment(8);
+	buffer = GuardedBuffer(24);
+	FNA3D_GetTextureData2D(device, texture, 0, 0, 3, 2, 0, buffer, 24);
+	CHECK(GuardIntact(buffer, 24, GUARD_BYTES),
+		"pack alignment 8: attached 3x2 target read wrote past 24 bytes");
+	CHECK(!Untouched(buffer, 24) && buffer[0] == buffer[20] && buffer[3] == 255,
+		"pack alignment 8: attached 3x2 target read is not the clear colour, tightly packed");
+	CHECK(PackAlignment() == 8, "pack alignment 8: target read left it at %d", PackAlignment());
+	free(buffer);
+	FNA3D_SetRenderTargets(device, NULL, 0, NULL, FNA3D_DEPTHFORMAT_NONE, 0);
+	FNA3D_AddDisposeTexture(device, texture);
+
+	/* 3x2 of the RGBA8 backbuffer. */
+	FNA3D_Clear(device, FNA3D_CLEAROPTIONS_TARGET, &color, 0.0f, 0);
+	SetPackAlignment(8);
+	buffer = GuardedBuffer(24);
+	FNA3D_ReadBackbuffer(device, 1, 1, 3, 2, buffer, 24);
+	CHECK(GuardIntact(buffer, 24, GUARD_BYTES),
+		"pack alignment 8: backbuffer 3x2 read wrote past 24 bytes");
+	CHECK(!Untouched(buffer, 24) && buffer[0] == buffer[20] && buffer[3] == 255,
+		"pack alignment 8: backbuffer 3x2 read is not the clear colour, tightly packed");
+	CHECK(PackAlignment() == 8, "pack alignment 8: backbuffer read left it at %d", PackAlignment());
+	free(buffer);
+	SetPackAlignment(4);
+}
+
 /* A level, rectangle or destination that does not fit is refused, and nothing is written. */
 static void TestRefusals(FNA3D_Device *device)
 {
@@ -423,6 +515,7 @@ int main(int argc, char **argv)
 		TestAttachedTarget(device, format);
 	}
 	TestRefusals(device);
+	TestForeignPackAlignment(device);
 	label = (SDL_GL_GetCurrentContext() == NULL) ? "Non-GL driver" : (es3 ? "OpenGL ES 3" : "OpenGL");
 
 	FNA3D_DestroyDevice(device);
