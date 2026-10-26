@@ -3497,10 +3497,14 @@ static uint16_t OPENGL_INTERNAL_FloatToHalf(float value)
 }
 
 /* OpenGL ES 3 has no glGetTexImage, so there a level -- of a 2D texture, or of one cube face --
- * is attached to the resolve framebuffer and read with glReadPixels, which ES 3 allows only as
- * RGBA/UNSIGNED_BYTE for a normalized colour buffer and RGBA/FLOAT for a float one. RGBA8 comes
- * back in its own layout; a float format is read as RGBA float and keeps its own channels, as
- * floats or halves. Any other format is refused rather than read in another layout.
+ * is attached to the resolve framebuffer and read with glReadPixels, which ES 3 guarantees only as
+ * RGBA/UNSIGNED_BYTE for a normalized colour buffer and RGBA/FLOAT for a float one, plus the one
+ * format/type pair the implementation names for the bound buffer. RGBA8 comes back in its own
+ * layout; a float format is read as RGBA float and keeps its own channels, as floats or halves;
+ * any other format is read directly when the implementation's own pair is the format's layout,
+ * and refused otherwise rather than read in another layout. sRGB RGBA8 is refused too: ES 3
+ * decodes an sRGB colour buffer to linear as it reads it, so the bytes would not be the
+ * texture's.
  */
 static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 	OpenGLRenderer *renderer,
@@ -3515,7 +3519,11 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 ) {
 	GLuint prevReadBuffer = renderer->currentReadFramebuffer;
 	GLuint prevDrawBuffer = renderer->currentDrawFramebuffer;
+	GLint readFormat = 0, readType = 0;
+	GLenum directFormat = GL_RGBA, directType = GL_UNSIGNED_BYTE;
 	int32_t channels = 0;
+	uint8_t complete;
+	uint8_t direct = 0;
 	uint8_t half = 0;
 	uint8_t ok = 0;
 	size_t texel, texels, channel;
@@ -3524,7 +3532,7 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 
 	switch (texture->format)
 	{
-		case FNA3D_SURFACEFORMAT_COLOR:		channels = 4;			break;
+		case FNA3D_SURFACEFORMAT_COLOR:		direct = 1;			break;
 		case FNA3D_SURFACEFORMAT_SINGLE:		channels = 1;			break;
 		case FNA3D_SURFACEFORMAT_VECTOR2:		channels = 2;			break;
 		case FNA3D_SURFACEFORMAT_VECTOR4:		channels = 4;			break;
@@ -3532,12 +3540,19 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 		case FNA3D_SURFACEFORMAT_HALFVECTOR2:	channels = 2; half = 1;	break;
 		case FNA3D_SURFACEFORMAT_HALFVECTOR4:
 		case FNA3D_SURFACEFORMAT_HDRBLENDABLE:	channels = 4; half = 1;	break;
-		default:
+		case FNA3D_SURFACEFORMAT_COLORSRGB_EXT:
 			FNA3D_LogError(
-				"GetData: OpenGL ES 3 cannot read back SurfaceFormat %d",
+				"GetData: OpenGL ES 3 reads an sRGB target back decoded to linear, "
+				"not as its SurfaceFormat %d bytes",
 				texture->format
 			);
 			return 0;
+		default:
+			/* Decided once the level is attached: the implementation's own pair. */
+			direct = 2;
+			directFormat = XNAToGL_TextureFormat[texture->format];
+			directType = XNAToGL_TextureDataType[texture->format];
+			break;
 	}
 
 	BindFramebuffer(renderer, renderer->resolveFramebufferRead);
@@ -3548,19 +3563,34 @@ static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
 		texture->handle,
 		level
 	);
-	if (renderer->glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	complete = renderer->glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+	if (complete && direct == 2)
+	{
+		renderer->glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_FORMAT, &readFormat);
+		renderer->glGetIntegerv(GL_IMPLEMENTATION_COLOR_READ_TYPE, &readType);
+	}
+	if (!complete)
 	{
 		FNA3D_LogError(
 			"GetData: SurfaceFormat %d is not readable on this OpenGL ES 3 device",
 			texture->format
 		);
 	}
+	else if (	direct == 2 &&
+			(	(GLenum) readFormat != directFormat ||
+				(GLenum) readType != directType	)	)
+	{
+		FNA3D_LogError(
+			"GetData: OpenGL ES 3 cannot read back SurfaceFormat %d in its own layout",
+			texture->format
+		);
+	}
 	else
 	{
 		pack = OPENGL_INTERNAL_BeginTightPack(renderer);
-		if (texture->format == FNA3D_SURFACEFORMAT_COLOR)
+		if (direct)
 		{
-			renderer->glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
+			renderer->glReadPixels(x, y, w, h, directFormat, directType, data);
 			ok = 1;
 		}
 		else

@@ -227,6 +227,8 @@ typedef unsigned char	GLboolean;
 #define GL_PACK_ROW_LENGTH				0x0D02
 #define GL_PACK_SKIP_ROWS				0x0D03
 #define GL_PACK_SKIP_PIXELS				0x0D04
+#define GL_IMPLEMENTATION_COLOR_READ_TYPE		0x8B9A
+#define GL_IMPLEMENTATION_COLOR_READ_FORMAT		0x8B9B
 
 /* Multitexture */
 #define GL_TEXTURE0					0x84C0

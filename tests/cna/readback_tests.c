@@ -43,8 +43,9 @@ typedef struct Format
 	const char *name;
 	int32_t texelBytes;
 	/* The texel bytes come back as uploaded (not for the signed formats, which FNA3D stores in
-	 * unsigned normalized textures, nor on ES 3, whose only supported reads are RGBA8 and the
-	 * float formats). */
+	 * unsigned normalized textures; on ES 3 only RGBA8 and the float formats are certain to be
+	 * readable, any other one is read exactly or refused -- sRGB always refused, as ES 3 decodes
+	 * it to linear when it reads it). */
 	uint8_t exactRoundTrip;
 	/* A float format, read back on ES 3 too. */
 	uint8_t isFloat;
@@ -71,6 +72,10 @@ static const Format formats[] =
 	{ FNA3D_SURFACEFORMAT_HALFVECTOR2,	"HalfVector2",		4, 1, 1, 1 },
 	{ FNA3D_SURFACEFORMAT_HALFVECTOR4,	"HalfVector4",		8, 1, 1, 1 },
 	{ FNA3D_SURFACEFORMAT_HDRBLENDABLE,	"HdrBlendable",		8, 1, 1, 1 },
+	{ FNA3D_SURFACEFORMAT_COLORBGRA_EXT,	"ColorBgraEXT",		4, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_COLORSRGB_EXT,	"ColorSrgbEXT",		4, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_BYTE_EXT,		"ByteEXT",		1, 1, 0, 0 },
+	{ FNA3D_SURFACEFORMAT_USHORT_EXT,	"UShortEXT",		2, 1, 0, 0 },
 };
 
 /* Distinct, finite, exactly representable values: halves 1.0 + n/1024, floats 1.0 + n/2^20, and
@@ -151,7 +156,9 @@ static void SetPackAlignment(int32_t alignment)
 	}
 }
 
-/* Whether this context can read the format back at all (ES 3 reads only RGBA8 and floats). */
+/* Whether this context is certain to read the format back (ES 3 reads RGBA8 and the float
+ * formats; any other format only when the implementation's own read layout is the format's, and
+ * is refused otherwise). */
 static int Readable(const Format *format)
 {
 	return !es3 || format->isFloat || (format->format == FNA3D_SURFACEFORMAT_COLOR);
@@ -185,7 +192,11 @@ static void CheckRead2D(
 	CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 		"%s %s level %d (%d,%d %dx%d): wrote past %zu bytes",
 		what, format->name, level, x, y, w, h, bytes);
-	if (format->exactRoundTrip && Readable(format))
+	if (format->exactRoundTrip && !Readable(format) && Untouched(buffer, bytes))
+	{
+		/* ES 3 refused a layout it cannot return; nothing was written. */
+	}
+	else if (format->exactRoundTrip)
 	{
 		for (row = 0; row < h; row += 1)
 		{
@@ -269,7 +280,8 @@ static void TestCube(FNA3D_Device *device, const Format *format, int32_t size, i
 			CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 				"cube %d %s face %d level %d: wrote past %zu bytes",
 				size, format->name, face, level, bytes);
-			if (format->exactRoundTrip && Readable(format))
+			if (	format->exactRoundTrip &&
+				(Readable(format) || !Untouched(buffer, bytes))	)
 			{
 				CHECK(memcmp(uploaded, buffer, bytes) == 0,
 					"cube %d %s face %d level %d: differs from the upload",
