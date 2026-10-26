@@ -385,6 +385,32 @@ void FNA3D_SetXnaPixelCenterEXT(FNA3D_Device *device, uint8_t enabled)
 	device->SetXnaPixelCenterEXT(device->driverData, enabled);
 }
 
+void FNA3D_SetLegacyBumpMapEnvEXT(
+	FNA3D_Device *device,
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+) {
+	if (device == NULL || sampler < 0 || sampler >= 16)
+	{
+		return;
+	}
+	device->SetLegacyBumpMapEnvEXT(
+		device->driverData,
+		sampler,
+		mat00,
+		mat01,
+		mat10,
+		mat11,
+		luminanceScale,
+		luminanceOffset
+	);
+}
+
 void FNA3D_SetScissorRect(FNA3D_Device *device, FNA3D_Rect *scissor)
 {
 	TRACE_SETSCISSORRECT

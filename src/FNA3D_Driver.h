@@ -355,6 +355,16 @@ struct FNA3D_Device
 
 	void (*SetViewport)(FNA3D_Renderer *driverData, FNA3D_Viewport *viewport);
 	void (*SetXnaPixelCenterEXT)(FNA3D_Renderer *driverData, uint8_t enabled);
+	void (*SetLegacyBumpMapEnvEXT)(
+		FNA3D_Renderer *driverData,
+		int32_t sampler,
+		float mat00,
+		float mat01,
+		float mat10,
+		float mat11,
+		float luminanceScale,
+		float luminanceOffset
+	);
 	void (*SetScissorRect)(FNA3D_Renderer *driverData, FNA3D_Rect *scissor);
 
 	void (*GetBlendFactor)(
@@ -752,6 +762,7 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(DrawPrimitives, name) \
 	ASSIGN_DRIVER_FUNC(SetViewport, name) \
 	ASSIGN_DRIVER_FUNC(SetXnaPixelCenterEXT, name) \
+	ASSIGN_DRIVER_FUNC(SetLegacyBumpMapEnvEXT, name) \
 	ASSIGN_DRIVER_FUNC(SetScissorRect, name) \
 	ASSIGN_DRIVER_FUNC(GetBlendFactor, name) \
 	ASSIGN_DRIVER_FUNC(SetBlendFactor, name) \

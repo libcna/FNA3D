@@ -2158,6 +2158,29 @@ static void SDLGPU_SetXnaPixelCenterEXT(FNA3D_Renderer *driverData, uint8_t enab
 	((SDLGPU_Renderer*) driverData)->xnaPixelCenterEnabled = enabled;
 }
 
+static void SDLGPU_SetLegacyBumpMapEnvEXT(
+	FNA3D_Renderer *driverData,
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+) {
+	/* MojoShader appends it to the uniforms of every pixel shader with a TEXBEM sampler. */
+	MOJOSHADER_sdlSetLegacyBumpMapEnv(
+		((SDLGPU_Renderer*) driverData)->mojoshaderContext,
+		(unsigned int) sampler,
+		mat00,
+		mat01,
+		mat10,
+		mat11,
+		luminanceScale,
+		luminanceOffset
+	);
+}
+
 static void SDLGPU_SetScissorRect(
 	FNA3D_Renderer *driverData,
 	FNA3D_Rect *scissor

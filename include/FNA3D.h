@@ -651,6 +651,24 @@ FNA3DAPI void FNA3D_SetViewport(FNA3D_Device *device, FNA3D_Viewport *viewport);
  */
 FNA3DAPI void FNA3D_SetXnaPixelCenterEXT(FNA3D_Device *device, uint8_t enabled);
 
+/* CNA extension: sets Direct3D 9's bump-environment state of one texture stage -- the
+ * D3DTSS_BUMPENVMAT00..11 matrix and D3DTSS_BUMPENVLSCALE/LOFFSET -- that a ps_1_x TEXBEM or
+ * TEXBEML reading that stage applies. XNA effects assign it as sampler/texture-stage state; it is
+ * device state, kept until it is set again, and starts as all zeros.
+ *
+ * sampler:	The texture stage, 0 to 15. Others are ignored.
+ */
+FNA3DAPI void FNA3D_SetLegacyBumpMapEnvEXT(
+	FNA3D_Device *device,
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+);
+
 /* Sets the scissor box for rendering, relative to the active render target.
  * It is required to call this at least once after calling SetRenderTargets, as
  * the renderer may need to adjust these dimensions to fit the backend's

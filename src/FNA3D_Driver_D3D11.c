@@ -1902,6 +1902,32 @@ static void D3D11_SetXnaPixelCenterEXT(FNA3D_Renderer *driverData, uint8_t enabl
 	((D3D11Renderer*) driverData)->xnaPixelCenterEnabled = enabled;
 }
 
+static void D3D11_SetLegacyBumpMapEnvEXT(
+	FNA3D_Renderer *driverData,
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+) {
+	/* MojoShader appends it to the constant buffer of every pixel shader with a TEXBEM sampler. */
+	D3D11Renderer *renderer = (D3D11Renderer*) driverData;
+	SDL_LockMutex(renderer->ctxLock);
+	MOJOSHADER_d3d11SetLegacyBumpMapEnv(
+		renderer->shaderContext,
+		(unsigned int) sampler,
+		mat00,
+		mat01,
+		mat10,
+		mat11,
+		luminanceScale,
+		luminanceOffset
+	);
+	SDL_UnlockMutex(renderer->ctxLock);
+}
+
 static void D3D11_SetScissorRect(FNA3D_Renderer *driverData, FNA3D_Rect *scissor)
 {
 	D3D11Renderer *renderer = (D3D11Renderer*) driverData;

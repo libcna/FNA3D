@@ -1832,6 +1832,31 @@ static void OPENGL_SetXnaPixelCenterEXT(FNA3D_Renderer *driverData, uint8_t enab
 	((OpenGLRenderer*) driverData)->xnaPixelCenterEnabled = enabled;
 }
 
+static void OPENGL_SetLegacyBumpMapEnvEXT(
+	FNA3D_Renderer *driverData,
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+) {
+	/* Activation makes this device's MojoShader context current: the state is that context's,
+	 * and MOJOSHADER_glProgramReady() uploads it to every program with a TEXBEM sampler.
+	 */
+	OPENGL_INTERNAL_Activate(driverData);
+	MOJOSHADER_glSetLegacyBumpMapEnv(
+		(unsigned int) sampler,
+		mat00,
+		mat01,
+		mat10,
+		mat11,
+		luminanceScale,
+		luminanceOffset
+	);
+}
+
 static void OPENGL_SetScissorRect(FNA3D_Renderer *driverData, FNA3D_Rect *scissor)
 {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
