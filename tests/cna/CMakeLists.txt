@@ -98,3 +98,35 @@ if(BUILD_SHARED_LIBS)
 		-P "${CMAKE_CURRENT_SOURCE_DIR}/installed_consumer.cmake"
 	)
 endif()
+
+# replay.c must compile against SDL 2 as well (BUILD_SDL3=OFF, TRACING_SUPPORT=ON), with the
+# definitions such a configuration gives it: this directory's, without the SDL 3 ones, plus
+# FNA3D_TRACING. A syntax check at C99 and C17 (C23 would make `true` a keyword); registered only
+# when SDL 2's development files are found and the compiler takes -fsyntax-only.
+find_package(SDL2 CONFIG QUIET)
+if(SDL2_FOUND AND DEFINED SDL2_INCLUDE_DIRS AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+	get_directory_property(FNA3D_CNA_SDL2_DEFINITIONS COMPILE_DEFINITIONS)
+	list(REMOVE_ITEM FNA3D_CNA_SDL2_DEFINITIONS USE_SDL3 FNA3D_DRIVER_SDL)
+	list(APPEND FNA3D_CNA_SDL2_DEFINITIONS FNA3D_TRACING)
+	set(FNA3D_CNA_SDL2_FLAGS "")
+	foreach(definition ${FNA3D_CNA_SDL2_DEFINITIONS})
+		list(APPEND FNA3D_CNA_SDL2_FLAGS "-D${definition}")
+	endforeach()
+	foreach(directory ${SDL2_INCLUDE_DIRS})
+		if(NOT directory STREQUAL "")
+			list(APPEND FNA3D_CNA_SDL2_FLAGS "-I${directory}")
+		endif()
+	endforeach()
+	foreach(standard gnu99 gnu17)
+		add_test(NAME fna3d_cna_replay_sdl2_${standard} COMMAND "${CMAKE_C_COMPILER}"
+			-std=${standard} -fsyntax-only
+			${FNA3D_CNA_SDL2_FLAGS}
+			"-I${PROJECT_SOURCE_DIR}/include"
+			"-I${PROJECT_SOURCE_DIR}/MojoShader"
+			"${PROJECT_SOURCE_DIR}/replay/replay.c"
+		)
+	endforeach()
+else()
+	message(STATUS "tests/cna: no SDL 2 development files (or no -fsyntax-only); "
+		"fna3d_cna_replay_sdl2_* are not registered")
+endif()

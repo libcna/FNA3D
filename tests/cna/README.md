@@ -32,6 +32,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   built and run through `find_package(FNA3D)` and, when pkg-config is present, through
   `pkg-config --define-prefix`; no path into FNA3D's source or build tree may reach its compiler.
   Registered only with `BUILD_SHARED_LIBS`, as only a shared FNA3D installs.
+- `fna3d_cna_replay_sdl2_gnu99`/`_gnu17` (no display, `CMakeLists.txt` only): `replay/replay.c`
+  must compile against SDL 2, as `BUILD_SDL3=OFF TRACING_SUPPORT=ON` builds it -- a
+  `-fsyntax-only` check with this directory's definitions minus the SDL 3 ones, plus
+  `FNA3D_TRACING`. Registered only when SDL 2's CMake package is found.
 - `test_effect.h`: the minimal Effect the drawing tests use, built in memory from the Effects
   Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
