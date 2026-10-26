@@ -36,6 +36,17 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   must compile against SDL 2, as `BUILD_SDL3=OFF TRACING_SUPPORT=ON` builds it -- a
   `-fsyntax-only` check with this directory's definitions minus the SDL 3 ones, plus
   `FNA3D_TRACING`. Registered only when SDL 2's CMake package is found.
+- `trace_tests.cmake` (`TRACING_SUPPORT` builds only; `fna3d_cna_trace_opengl`, `_opengl_es3`,
+  `_sdlgpu`): `trace_record.c` records three frames -- the CNA extension calls (marks 200 and
+  201), each right after a string marker, then a later frame changing the pass of an applied
+  effect, then a Depth vertex element in Byte4 -- and finds each extension record, with its
+  arguments, after its marker. `fna3d_replay` replays the trace with `trace_interposer.c`
+  preloaded, which logs what it hands the two extension entry points; the log must be the
+  captured calls. Under AddressSanitizer the replay runs with `detect_stack_use_after_return=1`,
+  which catches a pass change writing through a dead frame's state-change record; without it that
+  write cannot show. `fna3d_dumpspirv` then dumps the trace and `spirv_check.c`, linking the same
+  shaders through libFNA3D's MojoShader, finds the Depth element linked as DEPTH, not as
+  POSITION. `SDL_ASSERT=abort` turns either tool's assertions into failures.
 - `test_effect.h`: the minimal Effect the drawing tests use, built in memory from the Effects
   Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of

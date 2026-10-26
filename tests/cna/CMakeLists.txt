@@ -130,3 +130,61 @@ else()
 	message(STATUS "tests/cna: no SDL 2 development files (or no -fsyntax-only); "
 		"fna3d_cna_replay_sdl2_* are not registered")
 endif()
+
+# A recorded trace replays and dumps as it was captured (trace_tests.cmake), on each driver;
+# only a TRACING_SUPPORT build has the trace writer, fna3d_replay and fna3d_dumpspirv.
+if(TRACING_SUPPORT AND TARGET fna3d_replay)
+	add_executable(fna3d_cna_trace_record trace_record.c)
+	target_link_libraries(fna3d_cna_trace_record PRIVATE FNA3D)
+	target_include_directories(fna3d_cna_trace_record PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+		"${CMAKE_CURRENT_SOURCE_DIR}/../../MojoShader"
+	)
+	add_library(fna3d_cna_trace_interposer MODULE trace_interposer.c)
+	target_link_libraries(fna3d_cna_trace_interposer PRIVATE ${CMAKE_DL_LIBS})
+	if(TARGET SDL3::SDL3)
+		target_link_libraries(fna3d_cna_trace_record PRIVATE SDL3::SDL3)
+	endif()
+	set(FNA3D_CNA_DUMPSPIRV "")
+	set(FNA3D_CNA_SPIRV_CHECK "")
+	if(TARGET fna3d_dumpspirv)
+		# Links through the MojoShader libFNA3D exports, the one fna3d_dumpspirv uses.
+		add_executable(fna3d_cna_spirv_check spirv_check.c)
+		target_link_libraries(fna3d_cna_spirv_check PRIVATE FNA3D)
+		target_include_directories(fna3d_cna_spirv_check PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+			"${CMAKE_CURRENT_SOURCE_DIR}/../../MojoShader"
+		)
+		if(TARGET SDL3::SDL3)
+			target_link_libraries(fna3d_cna_spirv_check PRIVATE SDL3::SDL3)
+		endif()
+		set(FNA3D_CNA_DUMPSPIRV "$<TARGET_FILE:fna3d_dumpspirv>")
+		set(FNA3D_CNA_SPIRV_CHECK "$<TARGET_FILE:fna3d_cna_spirv_check>")
+	endif()
+	if(CMAKE_C_FLAGS MATCHES "-fsanitize=[^ ]*address")
+		set(FNA3D_CNA_ASAN ON)
+	else()
+		set(FNA3D_CNA_ASAN OFF)
+	endif()
+	foreach(variant opengl opengl_es3 sdlgpu)
+		if(variant STREQUAL "opengl")
+			set(environment "FNA3D_FORCE_DRIVER=OpenGL")
+		elseif(variant STREQUAL "opengl_es3")
+			set(environment "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+		else()
+			set(environment "FNA3D_FORCE_DRIVER=SDLGPU")
+		endif()
+		add_test(NAME fna3d_cna_trace_${variant} COMMAND "${CMAKE_COMMAND}"
+			"-DBUILD_DIR=${PROJECT_BINARY_DIR}"
+			"-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/trace-${variant}"
+			"-DRECORD=$<TARGET_FILE:fna3d_cna_trace_record>"
+			"-DREPLAY=$<TARGET_FILE:fna3d_replay>"
+			"-DINTERPOSER=$<TARGET_FILE:fna3d_cna_trace_interposer>"
+			"-DDUMPSPIRV=${FNA3D_CNA_DUMPSPIRV}"
+			"-DSPIRV_CHECK=${FNA3D_CNA_SPIRV_CHECK}"
+			"-DASAN=${FNA3D_CNA_ASAN}"
+			-P "${CMAKE_CURRENT_SOURCE_DIR}/trace_tests.cmake"
+		)
+		set_tests_properties(fna3d_cna_trace_${variant} PROPERTIES ENVIRONMENT "${environment}")
+	endforeach()
+endif()
