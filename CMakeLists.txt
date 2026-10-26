@@ -313,3 +313,10 @@ if(BUILD_SHARED_LIBS)
 		DESTINATION ${FNA3D_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
 	)
 endif()
+
+# Regression tests for the libcna fork's changes (tests/cna/README.md); they need a display.
+option(FNA3D_CNA_TESTS "Build the libcna fork's regression tests in tests/cna" OFF)
+if(FNA3D_CNA_TESTS)
+	enable_testing()
+	add_subdirectory(tests/cna)
+endif()
