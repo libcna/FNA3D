@@ -1238,9 +1238,16 @@ static inline OpenGLRenderer* OPENGL_INTERNAL_Activate(FNA3D_Renderer *driverDat
 
 /* Quit */
 
+static inline void DisposeResources(OpenGLRenderer *renderer);
+
 static void OPENGL_DestroyDevice(FNA3D_Device *device)
 {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(device->driverData);
+
+	/* CNA: resources disposed off the device thread wait in these lists for the next
+	 * SwapBuffers; destroy them while their GL and MojoShader contexts and locks still exist.
+	 */
+	DisposeResources(renderer);
 
 	if (renderer->useCoreProfile)
 	{
