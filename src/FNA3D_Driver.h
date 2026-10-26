@@ -195,6 +195,21 @@ static inline int32_t Texture_GetMipExtent(int32_t size, int32_t level)
 	return (size > 1) ? size : 1;
 }
 
+/* CNA: the bytes a w x h rectangle of a format occupies: whole blocks for a block-compressed
+ * format (a 4x4 DXT1 rectangle is one 8-byte block), texels otherwise. What Texture_CheckReadback
+ * requires the destination to hold, and exactly what a readback writes.
+ */
+static inline int64_t Texture_GetRectangleBytes(
+	FNA3D_SurfaceFormat format,
+	int32_t w,
+	int32_t h
+) {
+	const int32_t blockSize = Texture_GetBlockSize(format);
+	return	(int64_t) ((w + blockSize - 1) / blockSize) *
+		(int64_t) ((h + blockSize - 1) / blockSize) *
+		(int64_t) Texture_GetFormatSize(format);
+}
+
 /* CNA: what every driver's GetTextureData checks before it reads anything: that the level exists,
  * that the rectangle lies inside it, and that dataLength holds the rectangle's bytes (whole blocks
  * for a block-compressed format). A read that does not fit is refused with an error rather than
@@ -241,9 +256,7 @@ static inline uint8_t Texture_CheckReadback(
 		);
 		return 0;
 	}
-	bytes = (int64_t) ((w + blockSize - 1) / blockSize) *
-		(int64_t) ((h + blockSize - 1) / blockSize) *
-		(int64_t) formatSize;
+	bytes = Texture_GetRectangleBytes(format, w, h);
 	if (dataLength < 0 || bytes > (int64_t) dataLength)
 	{
 		FNA3D_LogError(

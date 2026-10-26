@@ -532,6 +532,48 @@ static void TestOversizedDestination(FNA3D_Device *device)
 	FNA3D_AddDisposeTexture(device, texture);
 }
 
+/* A block-compressed level is read in whole blocks: a 4x4 DXT1 level is one 8-byte block, an 8x8
+ * one four. The SDL_GPU driver reads them back exactly; OpenGL and D3D11 have no compressed
+ * readback and must refuse, leaving the destination untouched. Either way nothing may be written
+ * past the blocks -- CNA probes this with an 8-byte block on the stack.
+ */
+static void TestCompressedReadback(FNA3D_Device *device)
+{
+	const int32_t sizes[2] = { 4, 8 };
+	int i;
+	for (i = 0; i < 2; i += 1)
+	{
+		const int32_t size = sizes[i];
+		const size_t bytes = (size_t) ((size / 4) * (size / 4) * 8);
+		FNA3D_Texture *texture = FNA3D_CreateTexture2D(device, FNA3D_SURFACEFORMAT_DXT1,
+							       size, size, 1, 0);
+		uint8_t blocks[32];
+		uint8_t *buffer = GuardedBuffer(bytes);
+		size_t b;
+		for (b = 0; b < sizeof(blocks); b += 1)
+		{
+			blocks[b] = (uint8_t) (0x11 * (b % 8) + b / 8);
+		}
+		FNA3D_SetTextureData2D(device, texture, 0, 0, size, size, 0, blocks, (int32_t) bytes);
+		FNA3D_GetTextureData2D(device, texture, 0, 0, size, size, 0, buffer, (int32_t) bytes);
+		CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
+			"DXT1 %dx%d: wrote past its %zu bytes of blocks", size, size, bytes);
+		if (SDL_GL_GetCurrentContext() == NULL)
+		{
+			CHECK(memcmp(buffer, blocks, bytes) == 0,
+				"DXT1 %dx%d: the blocks read back differ from the upload", size, size);
+		}
+		else
+		{
+			CHECK(Untouched(buffer, bytes),
+				"DXT1 %dx%d: OpenGL has no compressed readback but wrote the destination",
+				size, size);
+		}
+		free(buffer);
+		FNA3D_AddDisposeTexture(device, texture);
+	}
+}
+
 /* A level, rectangle or destination that does not fit is refused, and nothing is written. */
 static void TestRefusals(FNA3D_Device *device)
 {
@@ -615,6 +657,7 @@ int main(int argc, char **argv)
 		TestAttachedTarget(device, format);
 	}
 	TestRefusals(device);
+	TestCompressedReadback(device);
 	TestForeignPackAlignment(device);
 	TestOversizedDestination(device);
 	label = (SDL_GL_GetCurrentContext() == NULL) ? "Non-GL driver" : (es3 ? "OpenGL ES 3" : "OpenGL");

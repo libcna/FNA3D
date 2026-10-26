@@ -3630,8 +3630,9 @@ static void SDLGPU_SetIndexBufferData(
 
 /* Transfer */
 
-/* CNA: dataLength is the region's own byte count, which the caller has checked its destination
- * holds -- not the destination's capacity, whose tail beyond the region the download never writes
+/* CNA: dataLength is the region's own byte count (Texture_GetRectangleBytes: whole blocks for a
+ * compressed format), which the caller has checked its destination holds -- not the destination's
+ * capacity, whose tail beyond the region the download never writes
  * and which must therefore not be copied out of a transfer buffer still holding an earlier read.
  */
 static void SDLGPU_INTERNAL_GetTextureData(
@@ -3871,7 +3872,7 @@ static void SDLGPU_GetTextureData2D(
 		0,
 		level,
 		data,
-		(uint32_t) w * (uint32_t) h * (uint32_t) Texture_GetFormatSize(textureHandle->format)
+		(uint32_t) Texture_GetRectangleBytes(textureHandle->format, w, h)
 	);
 }
 
@@ -3935,7 +3936,7 @@ static void SDLGPU_GetTextureDataCube(
 		(uint32_t) cubeMapFace,
 		level,
 		data,
-		(uint32_t) w * (uint32_t) h * (uint32_t) Texture_GetFormatSize(textureHandle->format)
+		(uint32_t) Texture_GetRectangleBytes(textureHandle->format, w, h)
 	);
 }
 
@@ -3981,7 +3982,7 @@ static void SDLGPU_ReadBackbuffer(
 		0,
 		0,
 		data,
-		(uint32_t) w * (uint32_t) h * (uint32_t) Texture_GetFormatSize(backbuffer->format)
+		(uint32_t) Texture_GetRectangleBytes(backbuffer->format, w, h)
 	);
 }
 
