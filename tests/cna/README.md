@@ -22,6 +22,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   asymmetric partial reads must then hold exactly those colours in order and write nothing past
   `w * h * 4` bytes -- on a window-sized backbuffer, a smaller faux one and 4x multisampled ones,
   whose resolve the scissor must not clip.
+- `vertex_usage_tests.c`: a `Depth` vertex element feeds the shader's DEPTH input. A vertex
+  shader that declares `dcl_depth v1` and outputs v1 as its colour must paint a whole-viewport
+  triangle in the colour its Depth stream carries, with the element after Position and before
+  it; the same draw through `dcl_color v1` and a Color element is the control.
 - `test_effect.h`: the minimal Effect the drawing tests use, built in memory from the Effects
   Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
