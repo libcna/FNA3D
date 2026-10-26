@@ -2,7 +2,8 @@
  *
  * Drawing through FNA3D takes an Effect, and no Effect compiler runs on Linux, so the tests build
  * the smallest one MOJOSHADER_compileEffect accepts straight from the format: one technique of
- * `passCount` passes, each binding the same vs_2_0 and ps_2_0 program, no parameters. The vertex
+ * `passCount` passes, each binding the same vertex and pixel program, no parameters
+ * (TestEffect_BuildPrograms takes any pair; TestEffect_Build the vs_2_0/ps_2_0 one below). The vertex
  * shader passes v0 (POSITION0) to oPos and v1 -- declared with the usage the caller names,
  * MOJOSHADER_USAGE_COLOR or _DEPTH, index 0 (MojoShader's usages are Direct3D 9's) -- to oD0;
  * the pixel shader writes its colour input v0 to oC0. So a draw paints exactly the colour its v1
@@ -71,11 +72,14 @@ static size_t TestEffect_PixelShader(uint32_t *tokens)
  * (type, class, name, semantic, elements) and the object index it holds -- the counts, the
  * technique and its passes, and the two shader objects.
  */
-static void TestEffect_Build(TestEffect *effect, MOJOSHADER_usage colorUsage, uint32_t passCount)
-{
-	uint32_t vs[16], ps[16];
-	const size_t vsCount = TestEffect_VertexShader(vs, colorUsage);
-	const size_t psCount = TestEffect_PixelShader(ps);
+static void TestEffect_BuildPrograms(
+	TestEffect *effect,
+	const uint32_t *vs,
+	size_t vsCount,
+	const uint32_t *ps,
+	size_t psCount,
+	uint32_t passCount
+) {
 	uint32_t *w = effect->words;
 	size_t n = 0;
 	uint32_t pass;
@@ -138,6 +142,14 @@ static void TestEffect_Build(TestEffect *effect, MOJOSHADER_usage colorUsage, ui
 	n += psCount;
 
 	effect->length = (uint32_t) (n * 4);
+}
+
+static void TestEffect_Build(TestEffect *effect, MOJOSHADER_usage colorUsage, uint32_t passCount)
+{
+	uint32_t vs[16], ps[16];
+	const size_t vsCount = TestEffect_VertexShader(vs, colorUsage);
+	const size_t psCount = TestEffect_PixelShader(ps);
+	TestEffect_BuildPrograms(effect, vs, vsCount, ps, psCount, passCount);
 }
 
 /* Opaque, unculled, depth-free drawing into a width x height viewport, as XNA's

@@ -84,6 +84,26 @@ add_test(NAME fna3d_cna_vertex_usage_sdlgpu COMMAND fna3d_cna_vertex_usage_tests
 set_tests_properties(fna3d_cna_vertex_usage_sdlgpu PROPERTIES
 	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")
 
+add_executable(fna3d_cna_vface_tests vface_tests.c)
+target_link_libraries(fna3d_cna_vface_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_vface_tests PRIVATE
+	"${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+	"${CMAKE_CURRENT_SOURCE_DIR}/../../MojoShader"
+)
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_vface_tests PRIVATE SDL3::SDL3)
+endif()
+
+add_test(NAME fna3d_cna_vface_opengl COMMAND fna3d_cna_vface_tests)
+set_tests_properties(fna3d_cna_vface_opengl PROPERTIES
+	ENVIRONMENT "FNA3D_FORCE_DRIVER=OpenGL")
+add_test(NAME fna3d_cna_vface_opengl_es3 COMMAND fna3d_cna_vface_tests)
+set_tests_properties(fna3d_cna_vface_opengl_es3 PROPERTIES
+	ENVIRONMENT "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+add_test(NAME fna3d_cna_vface_sdlgpu COMMAND fna3d_cna_vface_tests)
+set_tests_properties(fna3d_cna_vface_sdlgpu PROPERTIES
+	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")
+
 # A blend state's pipeline-cache key tells states apart (pipeline_cache_tests.c). No display;
 # FNA3D_PipelineCache.c is compiled into the test.
 add_executable(fna3d_cna_pipeline_cache_tests

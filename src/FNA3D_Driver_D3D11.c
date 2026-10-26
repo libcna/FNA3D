@@ -465,11 +465,14 @@ static float XNAToD3D_DepthBiasScale[] =
 	(float) ((1 << 24) - 1) 	/* DepthFormat.Depth24Stencil8 */
 };
 
+/* CNA: with FrontCounterClockwise = 0 (below) a clockwise triangle is D3D11's front face, as it
+ * is Direct3D 9's, so culling clockwise faces is culling front faces.
+ */
 static D3D11_CULL_MODE XNAToD3D_CullMode[] =
 {
 	D3D11_CULL_NONE,		/* CullMode.None */
-	D3D11_CULL_BACK,		/* CullMode.CullClockwiseFace */
-	D3D11_CULL_FRONT 		/* CullMode.CullCounterClockwiseFace */
+	D3D11_CULL_FRONT,		/* CullMode.CullClockwiseFace */
+	D3D11_CULL_BACK 		/* CullMode.CullCounterClockwiseFace */
 };
 
 static D3D11_TEXTURE_ADDRESS_MODE XNAToD3D_Wrap[] =
@@ -788,7 +791,12 @@ static ID3D11RasterizerState* D3D11_INTERNAL_FetchRasterizerState(
 	desc.DepthBiasClamp = D3D11_FLOAT32_MAX;
 	desc.DepthClipEnable = 1;
 	desc.FillMode = XNAToD3D_FillMode[state->fillMode];
-	desc.FrontCounterClockwise = 1;
+	/* CNA: clockwise is the front face, as in Direct3D 9 and XNA. With counter-clockwise fronts
+	 * the culling still came out right through the swapped cull modes, but SV_IsFrontFace -- and
+	 * with it VFACE -- was positive on counter-clockwise triangles, and the depth-stencil state's
+	 * FrontFace operations, which hold XNA's clockwise ones, ran on counter-clockwise triangles.
+	 */
+	desc.FrontCounterClockwise = 0;
 	desc.MultisampleEnable = state->multiSampleAntiAlias;
 	desc.ScissorEnable = state->scissorTestEnable;
 	desc.SlopeScaledDepthBias = state->slopeScaleDepthBias;

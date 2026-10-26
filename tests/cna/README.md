@@ -38,6 +38,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   shader that declares `dcl_depth v1` and outputs v1 as its colour must paint a whole-viewport
   triangle in the colour its Depth stream carries, with the element after Position and before
   it; the same draw through `dcl_color v1` and a Color element is the control.
+- `vface_tests.c`: a ps_3_0 shader paints green where VFACE >= 0 and red where it is negative; a
+  clockwise and a counter-clockwise triangle under each cull mode, into the backbuffer and a render
+  target, must show Direct3D 9's picture -- VFACE positive on the clockwise triangle, which
+  CullClockwiseFace removes.
 - `pipeline_cache_tests.c` (no display): a blend state's pipeline-cache key tells apart states
   that differ only in a blend function under an alpha destination blend of DestinationAlpha or
   later, or only in the multisample mask under a white blend factor -- which the int32_t packing's
