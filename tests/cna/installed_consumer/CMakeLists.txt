@@ -8,3 +8,8 @@ find_package(FNA3D CONFIG REQUIRED)
 
 add_executable(effect_client effect_client.c)
 target_link_libraries(effect_client PRIVATE FNA3D::FNA3D)
+
+# Where each configuration's executable lies (a multi-config generator puts it in a directory of
+# the configuration's name), for installed_consumer.cmake to run it.
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/effect_client-$<CONFIG>.path"
+	CONTENT "$<TARGET_FILE:effect_client>")

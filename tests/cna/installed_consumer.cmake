@@ -8,6 +8,12 @@
 # BUILD_SDL3 said. Each half below builds and runs installed_consumer/effect_client.c, and checks
 # that no path into FNA3D's source or build tree reached the compiler.
 #
+# CONFIG is the configuration ctest runs (its -C; a single-config build's CMAKE_BUILD_TYPE, empty
+# when there is none). It is the configuration installed and the one the consumer is built in, and
+# the consumer names the path of that configuration's executable itself: a multi-config generator
+# (Ninja Multi-Config, Visual Studio) neither installs a configuration nobody built nor puts the
+# executable at the top of its build tree.
+#
 # This file is part of the libcna fork of FNA3D; see tests/cna/README.md.
 
 foreach(variable FNA3D_SOURCE_DIR FNA3D_BUILD_DIR FNA3D_INSTALL_LIBDIR WORK_DIR CONSUMER_DIR
@@ -66,8 +72,14 @@ function(check_no_tree_paths what text)
 	endforeach()
 endfunction()
 
+set(CONFIG_ARGS "")
+if(DEFINED CONFIG AND NOT CONFIG STREQUAL "")
+	set(CONFIG_ARGS --config "${CONFIG}")
+endif()
+
 # Install, then move the installation: nothing may depend on the prefix it was installed to.
-run("install" "${CMAKE_COMMAND}" --install "${FNA3D_BUILD_DIR}" --prefix "${WORK_DIR}/staged")
+run("install" "${CMAKE_COMMAND}" --install "${FNA3D_BUILD_DIR}" --prefix "${WORK_DIR}/staged"
+	${CONFIG_ARGS})
 if(NOT STEP_OK)
 	message(FATAL_ERROR "cmake --install failed")
 endif()
@@ -87,6 +99,7 @@ set(CONFIGURE_ARGS
 	"-DCMAKE_C_FLAGS=${C_FLAGS}"
 	"-DCMAKE_EXE_LINKER_FLAGS=${EXE_LINKER_FLAGS}"
 	"-DCMAKE_PREFIX_PATH=${PREFIX}"
+	"-DCMAKE_BUILD_TYPE=${CONFIG}"
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
 if(DEFINED SDL3_DIR AND NOT SDL3_DIR STREQUAL "")
@@ -95,14 +108,21 @@ endif()
 run("find_package(FNA3D) consumer: configure" "${CMAKE_COMMAND}" ${CONFIGURE_ARGS})
 if(STEP_OK)
 	run("find_package(FNA3D) consumer: build"
-		"${CMAKE_COMMAND}" --build "${WORK_DIR}/cmake-consumer" --verbose)
+		"${CMAKE_COMMAND}" --build "${WORK_DIR}/cmake-consumer" --verbose ${CONFIG_ARGS})
 endif()
 if(STEP_OK)
 	check_no_tree_paths("the find_package(FNA3D) consumer's build" "${LAST_OUTPUT}")
 endif()
 if(STEP_OK)
-	run("find_package(FNA3D) consumer: run" "${WORK_DIR}/cmake-consumer/effect_client")
-	message(STATUS "${LAST_OUTPUT}")
+	set(CLIENT_PATH_FILE "${WORK_DIR}/cmake-consumer/effect_client-${CONFIG}.path")
+	if(EXISTS "${CLIENT_PATH_FILE}")
+		file(READ "${CLIENT_PATH_FILE}" CLIENT)
+		run("find_package(FNA3D) consumer: run" "${CLIENT}")
+		message(STATUS "${LAST_OUTPUT}")
+	else()
+		message(STATUS "find_package(FNA3D) consumer: FAILED, no ${CLIENT_PATH_FILE}")
+		set(FAILED_STEPS "${FAILED_STEPS};find_package(FNA3D) consumer: run")
+	endif()
 endif()
 
 # pkg-config, with the prefix taken from where FNA3D.pc now lies

@@ -52,6 +52,8 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   it declares `MOJOSHADER_effectStateChanges` and reads `MOJOSHADER_effect` -- configured,
   built and run through `find_package(FNA3D)` and, when pkg-config is present, through
   `pkg-config --define-prefix`; no path into FNA3D's source or build tree may reach its compiler.
+  The configuration ctest runs (`-C`, which a multi-config tree such as Ninja Multi-Config needs)
+  is the one installed and built, and the consumer names its own executable's path.
   Registered only with `BUILD_SHARED_LIBS`, as only a shared FNA3D installs.
 - `fna3d_cna_replay_sdl2_gnu99`/`_gnu17` (no display, `CMakeLists.txt` only): `replay/replay.c`
   must compile against SDL 2, as `BUILD_SDL3=OFF TRACING_SUPPORT=ON` builds it -- a
