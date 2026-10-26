@@ -444,6 +444,36 @@ static void TestForeignPackAlignment(FNA3D_Device *device)
 	SetPackAlignment(4);
 }
 
+/* SDL_GPU only copies the rectangle out of its transfer buffer: a destination larger than the
+ * rectangle keeps its tail, whatever an earlier, larger read left in the buffer.
+ */
+static void TestOversizedDestination(FNA3D_Device *device)
+{
+	const Format *format = &formats[0];
+	FNA3D_Texture *texture = FNA3D_CreateTexture2D(device, format->format, 4, 4, 1, 0);
+	uint8_t uploaded[64];
+	uint8_t *buffer = GuardedBuffer(64);
+	size_t i;
+	int tailIntact = 1;
+
+	FillPattern(format, uploaded, sizeof(uploaded), 3);
+	FNA3D_SetTextureData2D(device, texture, 0, 0, 4, 4, 0, uploaded, sizeof(uploaded));
+	/* A whole-level read first, so a transfer buffer holds 64 bytes of texels... */
+	FNA3D_GetTextureData2D(device, texture, 0, 0, 4, 4, 0, buffer, 64);
+	free(buffer);
+	/* ...then a 2x2 read into a 64-byte destination: only its first 16 bytes may change. */
+	buffer = GuardedBuffer(64);
+	FNA3D_GetTextureData2D(device, texture, 0, 0, 2, 2, 0, buffer, 64);
+	for (i = 16; i < 64; i += 1)
+	{
+		tailIntact = tailIntact && (buffer[i] == GUARD);
+	}
+	CHECK(tailIntact, "2x2 read into a 64-byte destination wrote past its 16 bytes");
+	CHECK(GuardIntact(buffer, 64, GUARD_BYTES), "2x2 read wrote past the 64-byte destination");
+	free(buffer);
+	FNA3D_AddDisposeTexture(device, texture);
+}
+
 /* A level, rectangle or destination that does not fit is refused, and nothing is written. */
 static void TestRefusals(FNA3D_Device *device)
 {
@@ -528,6 +558,7 @@ int main(int argc, char **argv)
 	}
 	TestRefusals(device);
 	TestForeignPackAlignment(device);
+	TestOversizedDestination(device);
 	label = (SDL_GL_GetCurrentContext() == NULL) ? "Non-GL driver" : (es3 ? "OpenGL ES 3" : "OpenGL");
 
 	FNA3D_DestroyDevice(device);

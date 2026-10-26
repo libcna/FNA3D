@@ -2764,6 +2764,11 @@ static void SDLGPU_INTERNAL_CreateFauxBackbuffer(
 		SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
 		SDL_GPU_SAMPLECOUNT_1
 	);
+	if (renderer->fauxBackbufferColorTexture != NULL)
+	{
+		/* CNA: for ReadBackbuffer's size check */
+		renderer->fauxBackbufferColorTexture->format = presentationParameters->backBufferFormat;
+	}
 
 	if (presentationParameters->depthStencilFormat != FNA3D_DEPTHFORMAT_NONE)
 	{
@@ -3625,6 +3630,10 @@ static void SDLGPU_SetIndexBufferData(
 
 /* Transfer */
 
+/* CNA: dataLength is the region's own byte count, which the caller has checked its destination
+ * holds -- not the destination's capacity, whose tail beyond the region the download never writes
+ * and which must therefore not be copied out of a transfer buffer still holding an earlier read.
+ */
 static void SDLGPU_INTERNAL_GetTextureData(
 	SDLGPU_Renderer *renderer,
 	SDL_GPUTexture *texture,
@@ -3862,7 +3871,7 @@ static void SDLGPU_GetTextureData2D(
 		0,
 		level,
 		data,
-		(uint32_t) dataLength
+		(uint32_t) w * (uint32_t) h * (uint32_t) Texture_GetFormatSize(textureHandle->format)
 	);
 }
 
@@ -3926,7 +3935,7 @@ static void SDLGPU_GetTextureDataCube(
 		(uint32_t) cubeMapFace,
 		level,
 		data,
-		dataLength
+		(uint32_t) w * (uint32_t) h * (uint32_t) Texture_GetFormatSize(textureHandle->format)
 	);
 }
 
@@ -3940,10 +3949,29 @@ static void SDLGPU_ReadBackbuffer(
 	int32_t dataLength
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDLGPU_TextureHandle *backbuffer = renderer->fauxBackbufferColorTexture;
+
+	/* CNA: the rectangle must lie inside the backbuffer and fit the destination, as for
+	 * GetTextureData; only its own bytes are copied out.
+	 */
+	if (!Texture_CheckReadback(
+		backbuffer->format,
+		1,
+		0,
+		(int32_t) backbuffer->createInfo.width,
+		(int32_t) backbuffer->createInfo.height,
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
+		return;
+	}
 
 	SDLGPU_INTERNAL_GetTextureData(
 		renderer,
-		renderer->fauxBackbufferColorTexture->texture,
+		backbuffer->texture,
 		(uint32_t) x,
 		(uint32_t) y,
 		0,
@@ -3953,7 +3981,7 @@ static void SDLGPU_ReadBackbuffer(
 		0,
 		0,
 		data,
-		(uint32_t) dataLength
+		(uint32_t) w * (uint32_t) h * (uint32_t) Texture_GetFormatSize(backbuffer->format)
 	);
 }
 
