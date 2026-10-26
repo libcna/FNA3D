@@ -1360,7 +1360,7 @@ static void replayOneFrame()
 
 	if (!ctx.quit)
 	{
-		ctx.finished = true;
+		ctx.finished = 1;
 	}
 
 	#undef REGISTER_OBJECT
