@@ -86,6 +86,7 @@ struct OpenGLTexture /* Cast from FNA3D_Texture* */
 	};
 	OpenGLTexture *next; /* linked list */
 	uint8_t external;
+	int32_t levelCount; /* CNA: bounds GetData's level; 0 for an external texture */
 };
 
 static OpenGLTexture NullTexture =
@@ -3294,78 +3295,329 @@ static void OPENGL_INTERNAL_DisposeBackbuffer(OpenGLRenderer *renderer)
 	#undef GLBACKBUFFER
 }
 
-static uint8_t OPENGL_INTERNAL_ReadTargetIfApplicable(
-	FNA3D_Renderer *driverData,
-	FNA3D_Texture* textureIn,
+/* CNA: GetData's readback paths, shared by 2D textures, render targets and cube faces.
+ *
+ * Every read writes into storage sized for the texture's own format: the caller's array, or a
+ * temporary copy of the whole level. A read therefore uses that format's own GL format and type
+ * (never an assumed RGBA8, which writes four bytes per texel into a two-byte HalfSingle array),
+ * tightly packed (GL_PACK_ALIGNMENT 1: the default of 4 pads every row of an odd-width one- or
+ * two-byte format past a tightly sized buffer), on a level whose size is clamped to at least one
+ * texel per side exactly as creation clamps it, and only after the level, the rectangle and the
+ * destination's length have been checked. The GL_PACK_ALIGNMENT a read changes goes back to its
+ * default of 4, as the upload paths do with GL_UNPACK_ALIGNMENT.
+ */
+
+static inline int32_t OPENGL_INTERNAL_MipSize(int32_t size, int32_t level)
+{
+	size >>= level;
+	return SDL_max(size, 1);
+}
+
+static uint8_t OPENGL_INTERNAL_CheckReadback(
+	OpenGLTexture *texture,
 	int32_t level,
-	void* data,
-	int32_t subX,
-	int32_t subY,
-	int32_t subW,
-	int32_t subH
+	int32_t levelWidth,
+	int32_t levelHeight,
+	int32_t x,
+	int32_t y,
+	int32_t w,
+	int32_t h,
+	int32_t dataLength
 ) {
-	GLuint prevReadBuffer, prevWriteBuffer;
-	OpenGLRenderer *renderer = (OpenGLRenderer*) driverData;
-	OpenGLTexture *texture = (OpenGLTexture*) textureIn;
-	/* CNA: a renderbuffer and a texture can share a GL name, so the name alone does not say the
-	 * texture is attached. A multisampled target's attachment is its renderbuffer, which
-	 * glReadPixels refuses; its resolved texture must be read with glGetTexImage instead.
-	 */
-	uint8_t texUnbound = (	renderer->currentDrawBuffers != 1 ||
-				renderer->currentAttachments[0] != texture->handle ||
-				renderer->currentAttachmentTypes[0] != GL_TEXTURE_2D	);
-	if (texUnbound && !renderer->useES3)
+	const int32_t formatSize = Texture_GetFormatSize(texture->format);
+	if (formatSize <= 0)
+	{
+		return 0;
+	}
+	if (	level < 0 ||
+		level >= texture->levelCount ||
+		level >= 31	)
+	{
+		FNA3D_LogError(
+			"GetData: mip level %d does not exist in this texture",
+			level
+		);
+		return 0;
+	}
+	if (	x < 0 ||
+		y < 0 ||
+		w <= 0 ||
+		h <= 0 ||
+		w > levelWidth - x ||
+		h > levelHeight - y	)
+	{
+		FNA3D_LogError(
+			"GetData: rectangle (%d, %d, %d, %d) is outside level %d (%dx%d)",
+			x, y, w, h, level, levelWidth, levelHeight
+		);
+		return 0;
+	}
+	if (	dataLength < 0 ||
+		((int64_t) w * (int64_t) h * (int64_t) formatSize) > (int64_t) dataLength	)
+	{
+		FNA3D_LogError(
+			"GetData: %d bytes cannot hold a %dx%d rectangle of %d-byte texels",
+			dataLength, w, h, formatSize
+		);
+		return 0;
+	}
+	return 1;
+}
+
+/* Reads a whole level with glGetTexImage (desktop GL), then copies the rectangle out of it. */
+static void OPENGL_INTERNAL_GetTexImageRect(
+	OpenGLRenderer *renderer,
+	OpenGLTexture *texture,
+	GLenum imageTarget,
+	int32_t level,
+	int32_t levelWidth,
+	int32_t levelHeight,
+	int32_t x,
+	int32_t y,
+	int32_t w,
+	int32_t h,
+	void *data
+) {
+	const GLenum glFormat = XNAToGL_TextureFormat[texture->format];
+	const GLenum glType = XNAToGL_TextureDataType[texture->format];
+	const size_t formatSize = (size_t) Texture_GetFormatSize(texture->format);
+	uint8_t *dataPtr = (uint8_t*) data;
+	uint8_t *texData;
+	int32_t row;
+
+	BindTexture(renderer, texture);
+	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	if (	x == 0 &&
+		y == 0 &&
+		w == levelWidth &&
+		h == levelHeight	)
+	{
+		/* Just throw the whole texture into the user array. */
+		renderer->glGetTexImage(imageTarget, level, glFormat, glType, data);
+	}
+	else
+	{
+		/* Get the whole texture... */
+		texData = (uint8_t*) SDL_malloc(
+			(size_t) levelWidth * (size_t) levelHeight * formatSize
+		);
+		if (texData == NULL)
+		{
+			FNA3D_LogError("GetData: out of memory");
+		}
+		else
+		{
+			renderer->glGetTexImage(imageTarget, level, glFormat, glType, texData);
+
+			/* Now, blit the rect region into the user array. */
+			for (row = y; row < y + h; row += 1)
+			{
+				SDL_memcpy(
+					dataPtr,
+					texData + ((((size_t) row * (size_t) levelWidth) + (size_t) x) * formatSize),
+					formatSize * (size_t) w
+				);
+				dataPtr += formatSize * (size_t) w;
+			}
+			SDL_free(texData);
+		}
+	}
+	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+}
+
+/* IEEE 754 binary32 to binary16, round to nearest even. */
+static uint16_t OPENGL_INTERNAL_FloatToHalf(float value)
+{
+	uint32_t bits, sign, exponent, mantissa, result;
+	SDL_memcpy(&bits, &value, sizeof(bits));
+	sign = (bits >> 16) & 0x8000;
+	exponent = (bits >> 23) & 0xFF;
+	mantissa = bits & 0x7FFFFF;
+	if (exponent == 0xFF)
+	{
+		return (uint16_t) (sign | 0x7C00 | (mantissa ? (0x200 | (mantissa >> 13)) : 0));
+	}
+	if (exponent > 142) /* 2^16 and up: infinity */
+	{
+		return (uint16_t) (sign | 0x7C00);
+	}
+	if (exponent < 113) /* below 2^-14: subnormal or zero */
+	{
+		uint32_t shift;
+		if (exponent < 102)
+		{
+			return (uint16_t) sign;
+		}
+		mantissa |= 0x800000;
+		shift = 126 - exponent;
+		result = mantissa >> shift;
+		if (	((mantissa >> (shift - 1)) & 1) &&
+			(((mantissa & ((1u << (shift - 1)) - 1)) != 0) || (result & 1))	)
+		{
+			result += 1;
+		}
+		return (uint16_t) (sign | result);
+	}
+	result = ((exponent - 112) << 10) | (mantissa >> 13);
+	if (	(mantissa & 0x1000) &&
+		(((mantissa & 0xFFF) != 0) || (result & 1))	)
+	{
+		result += 1; /* may carry into the exponent, up to infinity: still correct */
+	}
+	return (uint16_t) (sign | result);
+}
+
+/* OpenGL ES 3 has no glGetTexImage, so there a level -- of a 2D texture, or of one cube face --
+ * is attached to the resolve framebuffer and read with glReadPixels, which ES 3 allows only as
+ * RGBA/UNSIGNED_BYTE for a normalized colour buffer and RGBA/FLOAT for a float one. RGBA8 comes
+ * back in its own layout; a float format is read as RGBA float and keeps its own channels, as
+ * floats or halves. Any other format is refused rather than read in another layout.
+ */
+static uint8_t OPENGL_INTERNAL_ReadAttachedLevel(
+	OpenGLRenderer *renderer,
+	OpenGLTexture *texture,
+	GLenum attachTarget,
+	int32_t level,
+	int32_t x,
+	int32_t y,
+	int32_t w,
+	int32_t h,
+	void *data
+) {
+	GLuint prevReadBuffer = renderer->currentReadFramebuffer;
+	GLuint prevDrawBuffer = renderer->currentDrawFramebuffer;
+	int32_t channels = 0;
+	uint8_t half = 0;
+	uint8_t ok = 0;
+	size_t texel, texels, channel;
+	float *rgba;
+
+	switch (texture->format)
+	{
+		case FNA3D_SURFACEFORMAT_COLOR:		channels = 4;			break;
+		case FNA3D_SURFACEFORMAT_SINGLE:		channels = 1;			break;
+		case FNA3D_SURFACEFORMAT_VECTOR2:		channels = 2;			break;
+		case FNA3D_SURFACEFORMAT_VECTOR4:		channels = 4;			break;
+		case FNA3D_SURFACEFORMAT_HALFSINGLE:	channels = 1; half = 1;	break;
+		case FNA3D_SURFACEFORMAT_HALFVECTOR2:	channels = 2; half = 1;	break;
+		case FNA3D_SURFACEFORMAT_HALFVECTOR4:
+		case FNA3D_SURFACEFORMAT_HDRBLENDABLE:	channels = 4; half = 1;	break;
+		default:
+			FNA3D_LogError(
+				"GetData: OpenGL ES 3 cannot read back SurfaceFormat %d",
+				texture->format
+			);
+			return 0;
+	}
+
+	BindFramebuffer(renderer, renderer->resolveFramebufferRead);
+	renderer->glFramebufferTexture2D(
+		GL_FRAMEBUFFER,
+		GL_COLOR_ATTACHMENT0,
+		attachTarget,
+		texture->handle,
+		level
+	);
+	if (renderer->glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+	{
+		FNA3D_LogError(
+			"GetData: SurfaceFormat %d is not readable on this OpenGL ES 3 device",
+			texture->format
+		);
+	}
+	else
+	{
+		renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		if (texture->format == FNA3D_SURFACEFORMAT_COLOR)
+		{
+			renderer->glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
+			ok = 1;
+		}
+		else
+		{
+			texels = (size_t) w * (size_t) h;
+			rgba = (float*) SDL_calloc(texels * 4, sizeof(float));
+			if (rgba == NULL)
+			{
+				FNA3D_LogError("GetData: out of memory");
+			}
+			else
+			{
+				renderer->glReadPixels(x, y, w, h, GL_RGBA, GL_FLOAT, rgba);
+				for (texel = 0; texel < texels; texel += 1)
+				{
+					for (channel = 0; channel < (size_t) channels; channel += 1)
+					{
+						const float value = rgba[(texel * 4) + channel];
+						if (half)
+						{
+							((uint16_t*) data)[(texel * channels) + channel] =
+								OPENGL_INTERNAL_FloatToHalf(value);
+						}
+						else
+						{
+							((float*) data)[(texel * channels) + channel] = value;
+						}
+					}
+				}
+				SDL_free(rgba);
+				ok = 1;
+			}
+		}
+		renderer->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	}
+	renderer->glFramebufferTexture2D(
+		GL_FRAMEBUFFER,
+		GL_COLOR_ATTACHMENT0,
+		attachTarget,
+		0,
+		0
+	);
+
+	if (prevReadBuffer == prevDrawBuffer)
+	{
+		BindFramebuffer(renderer, prevReadBuffer);
+	}
+	else
+	{
+		BindReadFramebuffer(renderer, prevReadBuffer);
+		BindDrawFramebuffer(renderer, prevDrawBuffer);
+	}
+	return ok;
+}
+
+/* A single-sample render target still attached to the current draw framebuffer can be read
+ * straight from it -- the fast path -- when it is RGBA8, the one layout glReadPixels returns
+ * everywhere. Returns 1 when it read.
+ *
+ * CNA: a renderbuffer and a texture can share a GL name, so the name alone does not say the
+ * texture is attached. A multisampled target's attachment is its renderbuffer, which
+ * glReadPixels refuses; its resolved texture must be read with glGetTexImage instead.
+ */
+static uint8_t OPENGL_INTERNAL_ReadBoundTarget(
+	OpenGLRenderer *renderer,
+	OpenGLTexture *texture,
+	int32_t x,
+	int32_t y,
+	int32_t w,
+	int32_t h,
+	void* data
+) {
+	GLuint prevReadBuffer;
+	if (	texture->format != FNA3D_SURFACEFORMAT_COLOR ||
+		renderer->currentDrawBuffers != 1 ||
+		renderer->currentAttachments[0] != texture->handle ||
+		renderer->currentAttachmentTypes[0] != GL_TEXTURE_2D	)
 	{
 		return 0;
 	}
 
 	prevReadBuffer = renderer->currentReadFramebuffer;
-	prevWriteBuffer = renderer->currentDrawFramebuffer;
-	if (texUnbound)
-	{
-		BindFramebuffer(renderer, renderer->resolveFramebufferRead);
-		renderer->glFramebufferTexture2D(
-			GL_FRAMEBUFFER,
-			GL_COLOR_ATTACHMENT0,
-			GL_TEXTURE_2D,
-			texture->handle,
-			level
-		);
-	}
-	else
-	{
-		BindReadFramebuffer(renderer, renderer->targetFramebuffer);
-	}
-
-	/* glReadPixels should be faster than reading
-	 * back from the render target if we are already bound.
-	 */
-	renderer->glReadPixels(
-		subX,
-		subY,
-		subW,
-		subH,
-		GL_RGBA, /* FIXME: Assumption! */
-		GL_UNSIGNED_BYTE,
-		data
-	);
-
-	if (texUnbound)
-	{
-		if (prevReadBuffer == prevWriteBuffer)
-		{
-			BindFramebuffer(renderer, prevReadBuffer);
-		}
-		else
-		{
-			BindReadFramebuffer(renderer, prevReadBuffer);
-			BindDrawFramebuffer(renderer, prevWriteBuffer);
-		}
-	}
-	else
-	{
-		BindReadFramebuffer(renderer, prevReadBuffer);
-	}
+	BindReadFramebuffer(renderer, renderer->targetFramebuffer);
+	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	renderer->glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	renderer->glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	BindReadFramebuffer(renderer, prevReadBuffer);
 	return 1;
 }
 
@@ -3594,6 +3846,7 @@ static inline OpenGLTexture* OPENGL_INTERNAL_CreateTexture(
 	result->format = format;
 	result->next = NULL;
 	result->external = 0;
+	result->levelCount = levelCount;
 
 	BindTexture(renderer, result);
 	renderer->glTexParameteri(
@@ -4222,15 +4475,8 @@ static void OPENGL_GetTextureData2D(
 ) {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture;
-	GLenum glFormat;
-	int32_t glFormatSize;
-	uint8_t *texData;
-	int32_t row;
 	int32_t textureWidth, textureHeight;
-	uint8_t *dataPtr = (uint8_t*) data;
 	FNA3D_Command cmd;
-
-	SDL_assert(renderer->supports_NonES3);
 
 	if (renderer->threadID != SDL_GetCurrentThreadID())
 	{
@@ -4247,76 +4493,74 @@ static void OPENGL_GetTextureData2D(
 		return;
 	}
 
-	if (level == 0 && OPENGL_INTERNAL_ReadTargetIfApplicable(
-		driverData,
-		texture,
-		level,
-		data,
-		x,
-		y,
-		w,
-		h
-	)) {
-		return;
-	}
-
 	glTexture = (OpenGLTexture*) texture;
-	textureWidth = glTexture->twod.width >> level;
-	textureHeight = glTexture->twod.height >> level;
-	BindTexture(renderer, glTexture);
-	glFormat = XNAToGL_TextureFormat[glTexture->format];
-	if (glFormat == GL_COMPRESSED_TEXTURE_FORMATS)
+	if (XNAToGL_TextureFormat[glTexture->format] == GL_COMPRESSED_TEXTURE_FORMATS)
 	{
 		FNA3D_LogError(
 			"GetData with compressed textures unsupported!"
 		);
 		return;
 	}
-	else if (	x == 0 &&
-			y == 0 &&
-			w == textureWidth &&
-			h == textureHeight	)
+	if (level < 0 || level >= 31)
 	{
-		/* Just throw the whole texture into the user array. */
-		renderer->glGetTexImage(
+		FNA3D_LogError("GetData: mip level %d does not exist in this texture", level);
+		return;
+	}
+	textureWidth = OPENGL_INTERNAL_MipSize(glTexture->twod.width, level);
+	textureHeight = OPENGL_INTERNAL_MipSize(glTexture->twod.height, level);
+	if (!OPENGL_INTERNAL_CheckReadback(
+		glTexture,
+		level,
+		textureWidth,
+		textureHeight,
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
+		return;
+	}
+
+	/* glReadPixels should be faster than reading
+	 * back from the render target if we are already bound.
+	 */
+	if (	level == 0 &&
+		OPENGL_INTERNAL_ReadBoundTarget(renderer, glTexture, x, y, w, h, data)	)
+	{
+		return;
+	}
+
+	if (renderer->useES3)
+	{
+		OPENGL_INTERNAL_ReadAttachedLevel(
+			renderer,
+			glTexture,
 			GL_TEXTURE_2D,
 			level,
-			glFormat,
-			XNAToGL_TextureDataType[glTexture->format],
+			x,
+			y,
+			w,
+			h,
 			data
 		);
+		return;
 	}
-	else
-	{
-		glFormatSize = Texture_GetFormatSize(glTexture->format);
 
-		/* Get the whole texture... */
-		texData = (uint8_t*) SDL_malloc(
-			textureWidth *
-			textureHeight *
-			glFormatSize
-		);
-
-		renderer->glGetTexImage(
-			GL_TEXTURE_2D,
-			level,
-			glFormat,
-			XNAToGL_TextureDataType[glTexture->format],
-			texData
-		);
-
-		/* Now, blit the rect region into the user array. */
-		for (row = y; row < y + h; row += 1)
-		{
-			SDL_memcpy(
-				dataPtr,
-				texData + (((row * textureWidth) + x) * glFormatSize),
-				glFormatSize * w
-			);
-			dataPtr += glFormatSize * w;
-		}
-		SDL_free(texData);
-	}
+	SDL_assert(renderer->supports_NonES3);
+	OPENGL_INTERNAL_GetTexImageRect(
+		renderer,
+		glTexture,
+		GL_TEXTURE_2D,
+		level,
+		textureWidth,
+		textureHeight,
+		x,
+		y,
+		w,
+		h,
+		data
+	);
 }
 
 static void OPENGL_GetTextureData3D(
@@ -4354,15 +4598,8 @@ static void OPENGL_GetTextureDataCube(
 ) {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture;
-	GLenum glFormat;
-	int32_t glFormatSize;
-	uint8_t *texData;
-	int32_t row;
 	int32_t textureSize;
-	uint8_t *dataPtr = (uint8_t*) data;
 	FNA3D_Command cmd;
-
-	SDL_assert(renderer->supports_NonES3);
 
 	if (renderer->threadID != SDL_GetCurrentThreadID())
 	{
@@ -4381,61 +4618,69 @@ static void OPENGL_GetTextureDataCube(
 	}
 
 	glTexture = (OpenGLTexture*) texture;
-	textureSize = glTexture->cube.size >> level;
-	BindTexture(renderer, glTexture);
-	glFormat = XNAToGL_TextureFormat[glTexture->format];
-	if (glFormat == GL_COMPRESSED_TEXTURE_FORMATS)
+	if (XNAToGL_TextureFormat[glTexture->format] == GL_COMPRESSED_TEXTURE_FORMATS)
 	{
 		FNA3D_LogError(
 			"GetData with compressed textures unsupported!"
 		);
 		return;
 	}
-	else if (	x == 0 &&
-			y == 0 &&
-			w == textureSize &&
-			h == textureSize	)
+	if (	(int32_t) cubeMapFace < 0 ||
+		(int32_t) cubeMapFace > (int32_t) FNA3D_CUBEMAPFACE_NEGATIVEZ	)
 	{
-		/* Just throw the whole texture into the user array. */
-		renderer->glGetTexImage(
+		FNA3D_LogError("GetData: %d is not a cube map face", (int32_t) cubeMapFace);
+		return;
+	}
+	if (level < 0 || level >= 31)
+	{
+		FNA3D_LogError("GetData: mip level %d does not exist in this texture", level);
+		return;
+	}
+	textureSize = OPENGL_INTERNAL_MipSize(glTexture->cube.size, level);
+	if (!OPENGL_INTERNAL_CheckReadback(
+		glTexture,
+		level,
+		textureSize,
+		textureSize,
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
+		return;
+	}
+
+	if (renderer->useES3)
+	{
+		OPENGL_INTERNAL_ReadAttachedLevel(
+			renderer,
+			glTexture,
 			GL_TEXTURE_CUBE_MAP_POSITIVE_X + cubeMapFace,
 			level,
-			glFormat,
-			XNAToGL_TextureDataType[glTexture->format],
+			x,
+			y,
+			w,
+			h,
 			data
 		);
+		return;
 	}
-	else
-	{
-		glFormatSize = Texture_GetFormatSize(glTexture->format);
 
-		/* Get the whole texture... */
-		texData = (uint8_t*) SDL_malloc(
-			textureSize *
-			textureSize *
-			glFormatSize
-		);
-
-		renderer->glGetTexImage(
-			GL_TEXTURE_CUBE_MAP_POSITIVE_X + cubeMapFace,
-			level,
-			glFormat,
-			XNAToGL_TextureDataType[glTexture->format],
-			texData
-		);
-
-		/* Now, blit the rect region into the user array. */
-		for (row = y; row < y + h; row += 1)
-		{
-			SDL_memcpy(
-				dataPtr,
-				texData + (((row * textureSize) + x) * glFormatSize),
-				glFormatSize * w
-			);
-			dataPtr += glFormatSize * w;
-		}
-		SDL_free(texData);
-	}
+	SDL_assert(renderer->supports_NonES3);
+	OPENGL_INTERNAL_GetTexImageRect(
+		renderer,
+		glTexture,
+		GL_TEXTURE_CUBE_MAP_POSITIVE_X + cubeMapFace,
+		level,
+		textureSize,
+		textureSize,
+		x,
+		y,
+		w,
+		h,
+		data
+	);
 }
 
 /* Renderbuffers */

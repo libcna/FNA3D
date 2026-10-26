@@ -131,6 +131,7 @@ GL_PROC(NonES3NonCore, void, glTexEnvi, (GLenum a, GLenum b, GLint c))
 
 /* Needed for render targets. We're flexible, but not _that_ flexible. */
 GL_PROC_EXT(ARB_framebuffer_object, EXT, void, glBindFramebuffer, (GLenum a, GLuint b))
+GL_PROC_EXT(ARB_framebuffer_object, EXT, GLenum, glCheckFramebufferStatus, (GLenum a))
 GL_PROC_EXT(ARB_framebuffer_object, EXT, void, glBindRenderbuffer, (GLenum a, GLuint b))
 GL_PROC_EXT(ARB_framebuffer_object, EXT, void, glDeleteFramebuffers, (GLsizei a, const GLuint *b))
 GL_PROC_EXT(ARB_framebuffer_object, EXT, void, glDeleteRenderbuffers, (GLsizei a, const GLuint *b))
