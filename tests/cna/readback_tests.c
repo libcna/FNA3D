@@ -20,6 +20,12 @@
 #define GUARD 0xA5
 #define GUARD_BYTES 64
 #define GL_PACK_ALIGNMENT_ENUM 0x0D05
+#define GL_UNPACK_ALIGNMENT_ENUM	0x0CF5
+#define GL_UNPACK_ROW_LENGTH_ENUM	0x0CF2
+#define GL_UNPACK_SKIP_ROWS_ENUM	0x0CF3
+#define GL_UNPACK_SKIP_PIXELS_ENUM	0x0CF4
+#define GL_UNPACK_SKIP_IMAGES_ENUM	0x806D
+#define GL_UNPACK_IMAGE_HEIGHT_ENUM	0x806E
 
 /* The GL names the ES 3 read-layout query needs (tests do not include a GL header). */
 #define GL_RED_ENUM		0x1903
@@ -731,6 +737,127 @@ static void TestForeignPackAlignment(FNA3D_Device *device)
 	SetPackAlignment(4);
 }
 
+/* OpenGL only: an upload reads the caller's rows tightly packed whatever unpack state another user
+ * of the context left, and leaves that state as it found it -- a 2D level, a cube face and a
+ * volume, first with only GL_UNPACK_ALIGNMENT 8 (which pads the rows of every one of these), then
+ * with a row length and skipped rows, pixels and images as well. Each upload comes from an exactly
+ * sized allocation, so a read past it shows under AddressSanitizer; the 2D level and the face are
+ * read back. The volume has no readback.
+ */
+static const uint32_t unpackNames[6] =
+{
+	GL_UNPACK_ALIGNMENT_ENUM,
+	GL_UNPACK_ROW_LENGTH_ENUM,
+	GL_UNPACK_SKIP_ROWS_ENUM,
+	GL_UNPACK_SKIP_PIXELS_ENUM,
+	GL_UNPACK_IMAGE_HEIGHT_ENUM,
+	GL_UNPACK_SKIP_IMAGES_ENUM
+};
+
+static void SetUnpackState(const int32_t *values)
+{
+	typedef void (*PixelStorei)(uint32_t, int32_t);
+	PixelStorei pixelStorei = (PixelStorei) GLFunction("glPixelStorei");
+	size_t i;
+	for (i = 0; i < SDL_arraysize(unpackNames); i += 1)
+	{
+		pixelStorei(unpackNames[i], values[i]);
+	}
+}
+
+static void CheckUnpackState(const int32_t *values, const char *what)
+{
+	size_t i;
+	for (i = 0; i < SDL_arraysize(unpackNames); i += 1)
+	{
+		const int32_t value = GLInteger(unpackNames[i]);
+		CHECK(value == values[i], "%s: unpack state 0x%04X left at %d, not %d",
+			what, unpackNames[i], value, values[i]);
+	}
+}
+
+static void ForeignUnpackUploads(FNA3D_Device *device, const Format *format,
+				 const int32_t *foreign, const char *state)
+{
+	const size_t rowBytes = 3 * (size_t) format->texelBytes;
+	FNA3D_Texture *texture;
+	uint8_t *uploaded;
+	uint8_t *buffer;
+	char what[96];
+
+	/* 3x2 level: rows of three texels, which an alignment of 8 pads. */
+	SDL_snprintf(what, sizeof(what), "%s, %s 3x2 upload", state, format->name);
+	texture = FNA3D_CreateTexture2D(device, format->format, 3, 2, 1, 0);
+	uploaded = (uint8_t*) malloc(rowBytes * 2);
+	FillPattern(format, uploaded, rowBytes * 2, 11);
+	SetUnpackState(foreign);
+	FNA3D_SetTextureData2D(device, texture, 0, 0, 3, 2, 0, uploaded, (int32_t) (rowBytes * 2));
+	CheckUnpackState(foreign, what);
+	buffer = GuardedBuffer(rowBytes * 2);
+	FNA3D_GetTextureData2D(device, texture, 0, 0, 3, 2, 0, buffer, (int32_t) (rowBytes * 2));
+	CHECK(memcmp(buffer, uploaded, rowBytes * 2) == 0, "%s: read back differs", what);
+	free(buffer);
+	free(uploaded);
+	FNA3D_AddDisposeTexture(device, texture);
+
+	/* 3x3 cube face. */
+	SDL_snprintf(what, sizeof(what), "%s, %s 3x3 cube face upload", state, format->name);
+	texture = FNA3D_CreateTextureCube(device, format->format, 3, 1, 0);
+	uploaded = (uint8_t*) malloc(rowBytes * 3);
+	FillPattern(format, uploaded, rowBytes * 3, 12);
+	SetUnpackState(foreign);
+	FNA3D_SetTextureDataCube(device, texture, 0, 0, 3, 3, FNA3D_CUBEMAPFACE_POSITIVEX, 0,
+				 uploaded, (int32_t) (rowBytes * 3));
+	CheckUnpackState(foreign, what);
+	buffer = GuardedBuffer(rowBytes * 3);
+	FNA3D_GetTextureDataCube(device, texture, 0, 0, 3, 3, FNA3D_CUBEMAPFACE_POSITIVEX, 0,
+				 buffer, (int32_t) (rowBytes * 3));
+	CHECK(memcmp(buffer, uploaded, rowBytes * 3) == 0, "%s: read back differs", what);
+	free(buffer);
+	free(uploaded);
+	FNA3D_AddDisposeTexture(device, texture);
+
+	/* 3x3x2 volume. */
+	SDL_snprintf(what, sizeof(what), "%s, %s 3x3x2 volume upload", state, format->name);
+	texture = FNA3D_CreateTexture3D(device, format->format, 3, 3, 2, 1);
+	uploaded = (uint8_t*) malloc(rowBytes * 6);
+	FillPattern(format, uploaded, rowBytes * 6, 13);
+	SetUnpackState(foreign);
+	FNA3D_SetTextureData3D(device, texture, 0, 0, 0, 3, 3, 2, 0, uploaded,
+			       (int32_t) (rowBytes * 6));
+	CheckUnpackState(foreign, what);
+	free(uploaded);
+	FNA3D_AddDisposeTexture(device, texture);
+}
+
+static void TestForeignUnpackState(FNA3D_Device *device)
+{
+	const int32_t defaults[6] = { 4, 0, 0, 0, 0, 0 };
+	const int32_t alignment8[6] = { 8, 0, 0, 0, 0, 0 };
+	const int32_t everything[6] = { 8, 7, 1, 1, 5, 1 };
+	const Format *half = NULL;
+	const Format *color = &formats[0];
+	size_t i;
+
+	if (SDL_GL_GetCurrentContext() == NULL)
+	{
+		return;
+	}
+	for (i = 0; i < SDL_arraysize(formats); i += 1)
+	{
+		if (formats[i].format == FNA3D_SURFACEFORMAT_HALFSINGLE)
+		{
+			half = &formats[i];
+		}
+	}
+	/* HalfSingle: FNA3D sets an alignment of 2. Color: 4, which it used not to set at all. */
+	ForeignUnpackUploads(device, half, alignment8, "unpack alignment 8");
+	ForeignUnpackUploads(device, color, alignment8, "unpack alignment 8");
+	ForeignUnpackUploads(device, half, everything, "foreign unpack state");
+	ForeignUnpackUploads(device, color, everything, "foreign unpack state");
+	SetUnpackState(defaults);
+}
+
 /* SDL_GPU only copies the rectangle out of its transfer buffer: a destination larger than the
  * rectangle keeps its tail, whatever an earlier, larger read left in the buffer.
  */
@@ -890,6 +1017,7 @@ int main(int argc, char **argv)
 	TestRefusals(device);
 	TestCompressedReadback(device);
 	TestForeignPackAlignment(device);
+	TestForeignUnpackState(device);
 	TestOversizedDestination(device);
 	label = (SDL_GL_GetCurrentContext() == NULL) ? "Non-GL driver" : (es3 ? "OpenGL ES 3" : "OpenGL");
 

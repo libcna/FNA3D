@@ -4018,6 +4018,56 @@ static inline int32_t OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(
 	return SDL_min(8, Texture_GetFormatSize(format));
 }
 
+/* CNA: SetTextureData's uploads read the caller's rows tightly packed, at the alignment above
+ * (which a format's whole texels always satisfy), with no row length and no skipped rows, pixels
+ * or images. That unpack state is saved first and restored afterwards, whatever another user of
+ * the context left there: an upload used to set its alignment and then 4, the value FNA3D itself
+ * keeps -- overwriting a foreign 8 -- and to set nothing for a four-byte format, whose odd-width
+ * rows a foreign 8 then padded past the end of the caller's data.
+ */
+
+typedef struct OpenGLUnpackState
+{
+	GLint alignment;
+	GLint rowLength;
+	GLint skipRows;
+	GLint skipPixels;
+	GLint imageHeight;
+	GLint skipImages;
+} OpenGLUnpackState;
+
+static OpenGLUnpackState OPENGL_INTERNAL_BeginTightUnpack(
+	OpenGLRenderer *renderer,
+	GLint alignment
+) {
+	OpenGLUnpackState previous = { 4, 0, 0, 0, 0, 0 };
+	renderer->glGetIntegerv(GL_UNPACK_ALIGNMENT, &previous.alignment);
+	renderer->glGetIntegerv(GL_UNPACK_ROW_LENGTH, &previous.rowLength);
+	renderer->glGetIntegerv(GL_UNPACK_SKIP_ROWS, &previous.skipRows);
+	renderer->glGetIntegerv(GL_UNPACK_SKIP_PIXELS, &previous.skipPixels);
+	renderer->glGetIntegerv(GL_UNPACK_IMAGE_HEIGHT, &previous.imageHeight);
+	renderer->glGetIntegerv(GL_UNPACK_SKIP_IMAGES, &previous.skipImages);
+	renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
+	renderer->glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+	renderer->glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+	renderer->glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+	renderer->glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, 0);
+	renderer->glPixelStorei(GL_UNPACK_SKIP_IMAGES, 0);
+	return previous;
+}
+
+static void OPENGL_INTERNAL_EndTightUnpack(
+	OpenGLRenderer *renderer,
+	const OpenGLUnpackState *previous
+) {
+	renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, previous->alignment);
+	renderer->glPixelStorei(GL_UNPACK_ROW_LENGTH, previous->rowLength);
+	renderer->glPixelStorei(GL_UNPACK_SKIP_ROWS, previous->skipRows);
+	renderer->glPixelStorei(GL_UNPACK_SKIP_PIXELS, previous->skipPixels);
+	renderer->glPixelStorei(GL_UNPACK_IMAGE_HEIGHT, previous->imageHeight);
+	renderer->glPixelStorei(GL_UNPACK_SKIP_IMAGES, previous->skipImages);
+}
+
 static FNA3D_Texture* OPENGL_CreateTexture2D(
 	FNA3D_Renderer *driverData,
 	FNA3D_SurfaceFormat format,
@@ -4309,7 +4359,7 @@ static void OPENGL_SetTextureData2D(
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture = (OpenGLTexture*) texture;
 	GLenum glFormat;
-	int32_t packSize;
+	OpenGLUnpackState unpack;
 	FNA3D_Command cmd;
 
 	if (renderer->threadID != SDL_GetCurrentThreadID())
@@ -4353,14 +4403,10 @@ static void OPENGL_SetTextureData2D(
 	else
 	{
 		/* Set pixel alignment to match texel size in bytes. */
-		packSize = OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format);
-		if (packSize != 4)
-		{
-			renderer->glPixelStorei(
-				GL_UNPACK_ALIGNMENT,
-				packSize
-			);
-		}
+		unpack = OPENGL_INTERNAL_BeginTightUnpack(
+			renderer,
+			OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format)
+		);
 
 		renderer->glTexSubImage2D(
 			GL_TEXTURE_2D,
@@ -4374,14 +4420,8 @@ static void OPENGL_SetTextureData2D(
 			data
 		);
 
-		/* Keep this state sane -flibit */
-		if (packSize != 4)
-		{
-			renderer->glPixelStorei(
-				GL_UNPACK_ALIGNMENT,
-				4
-			);
-		}
+		/* CNA: back to the caller's unpack state, not to 4 */
+		OPENGL_INTERNAL_EndTightUnpack(renderer, &unpack);
 	}
 }
 
@@ -4400,7 +4440,7 @@ static void OPENGL_SetTextureData3D(
 ) {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture = (OpenGLTexture*) texture;
-	int32_t packSize;
+	OpenGLUnpackState unpack;
 	FNA3D_Command cmd;
 
 	SDL_assert(renderer->supports_3DTexture);
@@ -4427,11 +4467,10 @@ static void OPENGL_SetTextureData3D(
 	/* CNA: tightly packed rows, as SetTextureData2D reads them; GL_UNPACK_ALIGNMENT's default of
 	 * 4 reads past the end of an odd-width one- or two-byte volume.
 	 */
-	packSize = OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format);
-	if (packSize != 4)
-	{
-		renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, packSize);
-	}
+	unpack = OPENGL_INTERNAL_BeginTightUnpack(
+		renderer,
+		OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format)
+	);
 	renderer->glTexSubImage3D(
 		GL_TEXTURE_3D,
 		level,
@@ -4445,10 +4484,7 @@ static void OPENGL_SetTextureData3D(
 		XNAToGL_TextureDataType[glTexture->format],
 		data
 	);
-	if (packSize != 4)
-	{
-		renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-	}
+	OPENGL_INTERNAL_EndTightUnpack(renderer, &unpack);
 }
 
 static void OPENGL_SetTextureDataCube(
@@ -4466,7 +4502,7 @@ static void OPENGL_SetTextureDataCube(
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *glTexture = (OpenGLTexture*) texture;
 	GLenum glFormat;
-	int32_t packSize;
+	OpenGLUnpackState unpack;
 	FNA3D_Command cmd;
 
 	if (renderer->threadID != SDL_GetCurrentThreadID())
@@ -4513,11 +4549,10 @@ static void OPENGL_SetTextureDataCube(
 		/* CNA: tightly packed rows, as SetTextureData2D reads them; GL_UNPACK_ALIGNMENT's
 		 * default of 4 read past the end of an odd-size one- or two-byte face.
 		 */
-		packSize = OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format);
-		if (packSize != 4)
-		{
-			renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, packSize);
-		}
+		unpack = OPENGL_INTERNAL_BeginTightUnpack(
+			renderer,
+			OPENGL_INTERNAL_Texture_GetPixelStoreAlignment(glTexture->format)
+		);
 		renderer->glTexSubImage2D(
 			GL_TEXTURE_CUBE_MAP_POSITIVE_X + cubeMapFace,
 			level,
@@ -4529,10 +4564,7 @@ static void OPENGL_SetTextureDataCube(
 			XNAToGL_TextureDataType[glTexture->format],
 			data
 		);
-		if (packSize != 4)
-		{
-			renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-		}
+		OPENGL_INTERNAL_EndTightUnpack(renderer, &unpack);
 	}
 }
 
@@ -4550,8 +4582,9 @@ static void OPENGL_SetTextureDataYUV(
 ) {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	uint8_t *dataPtr = (uint8_t*) data;
+	OpenGLUnpackState unpack;
 
-	renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	unpack = OPENGL_INTERNAL_BeginTightUnpack(renderer, 1);
 	BindTexture(renderer, (OpenGLTexture*) y);
 	renderer->glTexSubImage2D(
 		GL_TEXTURE_2D,
@@ -4590,7 +4623,7 @@ static void OPENGL_SetTextureDataYUV(
 		GL_UNSIGNED_BYTE,
 		dataPtr
 	);
-	renderer->glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+	OPENGL_INTERNAL_EndTightUnpack(renderer, &unpack); /* CNA: not 4 */
 }
 
 static void OPENGL_GetTextureData2D(

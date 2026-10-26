@@ -14,7 +14,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   ES 3 RGBA8, sRGB RGBA8 and the float formats must read back; any other format must read back
   exactly when `GL_IMPLEMENTATION_COLOR_READ_FORMAT`/`_TYPE`, asked of the level attached to a
   framebuffer of the test's own, are the format's layout, and must be refused otherwise. 4x
-  multisampled RGBA8 and sRGB targets must resolve to their clear colour. Build with
+  multisampled RGBA8 and sRGB targets must resolve to their clear colour. On OpenGL, reads with
+  `GL_PACK_ALIGNMENT` 8 and uploads (2D, cube face, volume) with `GL_UNPACK_ALIGNMENT` 8 -- and
+  then a row length and skipped rows, pixels and images too -- left on the context must stay
+  tightly packed and leave that state in place. Build with
   `-DCMAKE_C_FLAGS="-fsanitize=address,undefined"` to have the sanitizers watch the driver's own
   temporary buffers as well.
 - `dispose_tests.c`: a texture, two buffers, a renderbuffer and a query disposed from another
