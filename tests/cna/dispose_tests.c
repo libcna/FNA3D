@@ -18,6 +18,8 @@
 #include <SDL3/SDL.h>
 
 #include "FNA3D.h"
+#include "mojoshader.h"
+#include "test_effect.h"
 
 /* Live SDL allocations, counted through SDL_SetMemoryFunctions (SDL_GetNumAllocations is -1
  * unless SDL was built to track them).
@@ -98,6 +100,12 @@ static int Cycle(SDL_Window *window, int offThread)
 	DisposeJob job;
 	FNA3D_SamplerState samplerState;
 	SDL_Thread *thread;
+	TestEffect code;
+	FNA3D_Effect *effect = NULL;
+	MOJOSHADER_effect *effectData = NULL;
+	MOJOSHADER_effectStateChanges stateChanges;
+	FNA3D_VertexElement elements[2];
+	FNA3D_VertexBufferBinding binding;
 
 	SDL_memset(&parameters, '\0', sizeof(parameters));
 	parameters.backBufferWidth = 64;
@@ -131,6 +139,32 @@ static int Cycle(SDL_Window *window, int offThread)
 	samplerState.addressW = FNA3D_TEXTUREADDRESSMODE_CLAMP;
 	samplerState.maxAnisotropy = 4;
 	FNA3D_VerifySampler(device, 0, job.texture, &samplerState);
+	/* Vertex buffer bindings applied through an effect, which the SDL_GPU driver remembers in
+	 * its vertex-buffer-bindings cache. The effect itself goes on the device thread.
+	 */
+	TestEffect_Build(&code, MOJOSHADER_USAGE_COLOR, 1);
+	FNA3D_CreateEffect(device, (uint8_t*) code.words, code.length, &effect, &effectData);
+	if (effect == NULL || effectData == NULL || effectData->error_count > 0)
+	{
+		fprintf(stderr, "the test effect did not compile\n");
+		return 0;
+	}
+	elements[0].offset = 0;
+	elements[0].vertexElementFormat = FNA3D_VERTEXELEMENTFORMAT_VECTOR4;
+	elements[0].vertexElementUsage = FNA3D_VERTEXELEMENTUSAGE_POSITION;
+	elements[0].usageIndex = 0;
+	elements[1] = elements[0];
+	elements[1].offset = 16;
+	elements[1].vertexElementUsage = FNA3D_VERTEXELEMENTUSAGE_COLOR;
+	SDL_memset(&binding, '\0', sizeof(binding));
+	binding.vertexBuffer = job.vertexBuffer;
+	binding.vertexDeclaration.vertexStride = 32;
+	binding.vertexDeclaration.elementCount = 2;
+	binding.vertexDeclaration.elements = elements;
+	SDL_memset(&stateChanges, '\0', sizeof(stateChanges));
+	FNA3D_ApplyEffect(device, effect, 0, &stateChanges);
+	FNA3D_ApplyVertexBufferBindings(device, &binding, 1, 1, 0);
+	FNA3D_AddDisposeEffect(device, effect);
 	if (offThread)
 	{
 		thread = SDL_CreateThread(DisposeOffThread, "dispose", &job);

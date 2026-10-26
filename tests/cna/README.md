@@ -14,7 +14,8 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   temporary buffers as well.
 - `dispose_tests.c`: a texture, two buffers, a renderbuffer and a query disposed from another
   thread wait for the next `SwapBuffers`; destroying the device first must still free them, and
-  the device its own caches. The test counts live SDL allocations through `SDL_SetMemoryFunctions`
+  the device its own caches -- a sampler, and vertex buffer bindings applied through an effect
+  (`test_effect.h`). The test counts live SDL allocations through `SDL_SetMemoryFunctions`
   around a device's lifetime, on OpenGL, OpenGL ES 3 and the SDL_GPU driver.
 - `backbuffer_tests.c`: `ReadBackbuffer` returns the rectangle asked for, in the backbuffer's
   top-left origin. Every pixel is painted its own colour (row and half) by drawing through a

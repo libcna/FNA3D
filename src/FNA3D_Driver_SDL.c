@@ -4389,6 +4389,9 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 	}
 	SDL_free(renderer->samplerStateArray.elements); /* CNA */
 
+	/* CNA: the vertex-buffer-bindings cache holds no GPU objects, only its array */
+	SDL_free(renderer->vertexBufferBindingsCache.elements);
+
 	SDL_ReleaseGPUTexture(
 		renderer->device,
 		renderer->dummyTexture2D

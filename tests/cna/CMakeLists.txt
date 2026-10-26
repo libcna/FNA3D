@@ -24,7 +24,10 @@ set_tests_properties(fna3d_cna_readback_sdlgpu PROPERTIES
 
 add_executable(fna3d_cna_dispose_tests dispose_tests.c)
 target_link_libraries(fna3d_cna_dispose_tests PRIVATE FNA3D)
-target_include_directories(fna3d_cna_dispose_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
+target_include_directories(fna3d_cna_dispose_tests PRIVATE
+	"${CMAKE_CURRENT_SOURCE_DIR}/../../include"
+	"${CMAKE_CURRENT_SOURCE_DIR}/../../MojoShader"
+)
 if(TARGET SDL3::SDL3)
 	target_link_libraries(fna3d_cna_dispose_tests PRIVATE SDL3::SDL3)
 endif()
