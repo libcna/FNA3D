@@ -4440,6 +4440,10 @@ static SDL_PropertiesID SDLGPU_INTERNAL_FillProperties(bool debugMode)
 
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_PRIVATE_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_PRIVATE));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_SPIRV));
+	/* CNA: SDL_shadercross offers DXBC once its Init has loaded d3dcompiler (FXC); SDL's D3D12
+	 * backend takes a device that has no DXIL only when this says DXBC.
+	 */
+	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXBC_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_DXBC));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_DXIL));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_MSL));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_METALLIB_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_METALLIB));

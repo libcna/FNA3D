@@ -39,6 +39,11 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   that differ only in a blend function under an alpha destination blend of DestinationAlpha or
   later, or only in the multisample mask under a white blend factor -- which the int32_t packing's
   sign extension merged into one key.
+- `sdlgpu_properties_tests.c` (no display): the SDL_GPU driver's device-creation properties say
+  exactly the shader formats `MOJOSHADER_sdlGetShaderFormats()` offers -- every single format, an
+  SDL_shadercross with FXC but no DXC's SPIR-V, DXBC and MSL, and all of them -- DXBC included,
+  without which SDL's D3D12 backend refuses a device that has no DXIL. The driver is compiled
+  into the test with that query replaced.
 - `installed_consumer.cmake` (no display): `cmake --install` into the build tree, the
   installation moved away from its prefix, then the Effect client in `installed_consumer/` --
   it declares `MOJOSHADER_effectStateChanges` and reads `MOJOSHADER_effect` -- configured,
