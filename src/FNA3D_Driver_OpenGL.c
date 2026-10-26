@@ -198,7 +198,9 @@ typedef struct OpenGLRenderer /* Cast from FNA3D_Renderer* */
 	uint8_t supports_srgb_rendertarget;
 	uint8_t supports_bc7;
 	int32_t maxMultiSampleCount;
-	int32_t maxMultiSampleCountFormat[21];
+	/* CNA: one per SurfaceFormat, extensions included (was 21: ColorSrgbEXT and later read the
+	 * fields after the array, windowSampleCount first, so an sRGB target got 0 samples) */
+	int32_t maxMultiSampleCountFormat[FNA3D_SURFACEFORMAT_USHORT_EXT + 1];
 	int32_t windowSampleCount;
 
 	/* Blend State */
@@ -5854,7 +5856,8 @@ static int32_t OPENGL_GetMaxMultiSampleCount(
 	int32_t maxSamples;
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 
-	if (renderer->supports_ARB_internalformat_query)
+	if (	renderer->supports_ARB_internalformat_query &&
+		(uint32_t) format < SDL_arraysize(renderer->maxMultiSampleCountFormat)	)
 	{
 		maxSamples = renderer->maxMultiSampleCountFormat[format];
 	}
@@ -6148,7 +6151,7 @@ static inline void LoadEntryPoints(
 	 */
 	if (renderer->supports_ARB_internalformat_query)
 	{
-		for (i = 0; i < 21; i += 1)
+		for (i = 0; i < (int32_t) SDL_arraysize(renderer->maxMultiSampleCountFormat); i += 1)
 		{
 			renderer->glGetInternalformativ(
 				GL_RENDERBUFFER,
@@ -6610,7 +6613,9 @@ FNA3D_Device* OPENGL_CreateDevice(
 			&renderer->maxMultiSampleCount
 		);
 	}
-	if (renderer->supports_ARB_internalformat_query)
+	if (	renderer->supports_ARB_internalformat_query &&
+		(uint32_t) presentationParameters->backBufferFormat <
+			SDL_arraysize(renderer->maxMultiSampleCountFormat)	)
 	{
 		presentationParameters->multiSampleCount = SDL_min(
 			presentationParameters->multiSampleCount,

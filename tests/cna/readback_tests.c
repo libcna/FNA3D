@@ -1014,6 +1014,44 @@ static void TestCompressedReadback(FNA3D_Device *device)
 	}
 }
 
+/* OpenGL only: the multisample count FNA3D grants a format is the one GL reports for that format's
+ * renderbuffer. The per-format table used to stop before ColorSrgbEXT, so that format and every
+ * later one read the fields after it -- an sRGB target got the window's sample count, 0 here.
+ */
+static void TestMultiSampleCounts(FNA3D_Device *device)
+{
+	typedef void (*GetInternalformativ)(uint32_t, uint32_t, uint32_t, int32_t, int32_t*);
+	const struct { FNA3D_SurfaceFormat format; uint32_t internalFormat; const char *name; } cases[] =
+	{
+		{ FNA3D_SURFACEFORMAT_COLOR,		0x8058 /* GL_RGBA8 */,		"Color" },
+		{ FNA3D_SURFACEFORMAT_COLORSRGB_EXT,	0x8C43 /* GL_SRGB8_ALPHA8 */,	"ColorSrgbEXT" },
+		{ FNA3D_SURFACEFORMAT_BYTE_EXT,		0x8229 /* GL_R8 */,		"ByteEXT" },
+	};
+	GetInternalformativ getInternalformativ;
+	size_t i;
+
+	if (SDL_GL_GetCurrentContext() == NULL)
+	{
+		return;
+	}
+	getInternalformativ = (GetInternalformativ) SDL_GL_GetProcAddress("glGetInternalformativ");
+	if (getInternalformativ == NULL)
+	{
+		return;
+	}
+	for (i = 0; i < SDL_arraysize(cases); i += 1)
+	{
+		int32_t samples = 0;
+		int32_t granted;
+		getInternalformativ(0x8D41 /* GL_RENDERBUFFER */, cases[i].internalFormat,
+				    0x80A9 /* GL_SAMPLES */, 1, &samples);
+		granted = FNA3D_GetMaxMultiSampleCount(device, cases[i].format, 8);
+		CHECK(granted == ((samples < 8) ? samples : 8),
+			"%s: FNA3D grants %d of 8 samples, GL reports %d for its renderbuffer",
+			cases[i].name, granted, samples);
+	}
+}
+
 /* A level, rectangle or destination that does not fit is refused, and nothing is written. */
 static void TestRefusals(FNA3D_Device *device)
 {
@@ -1102,6 +1140,7 @@ int main(int argc, char **argv)
 	TestMultisampledTarget(device, FNA3D_SURFACEFORMAT_COLORSRGB_EXT, "ColorSrgbEXT");
 	TestRefusals(device);
 	TestCompressedReadback(device);
+	TestMultiSampleCounts(device);
 	TestForeignPackAlignment(device);
 	TestForeignUnpackState(device);
 	TestOversizedDestination(device);
