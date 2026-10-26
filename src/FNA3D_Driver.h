@@ -182,6 +182,79 @@ static inline int32_t Texture_GetFormatSize(
 	}
 }
 
+/* CNA: a mip level's extent, clamped to one texel as creation sizes it. A level no texture can
+ * have gives 1, so the extent can be computed before Texture_CheckReadback refuses that level.
+ */
+static inline int32_t Texture_GetMipExtent(int32_t size, int32_t level)
+{
+	if (level < 0 || level >= 31)
+	{
+		return 1;
+	}
+	size >>= level;
+	return (size > 1) ? size : 1;
+}
+
+/* CNA: what every driver's GetTextureData checks before it reads anything: that the level exists,
+ * that the rectangle lies inside it, and that dataLength holds the rectangle's bytes (whole blocks
+ * for a block-compressed format). A read that does not fit is refused with an error rather than
+ * reading or writing past an edge.
+ */
+static inline uint8_t Texture_CheckReadback(
+	FNA3D_SurfaceFormat format,
+	int32_t levelCount,
+	int32_t level,
+	int32_t levelWidth,
+	int32_t levelHeight,
+	int32_t x,
+	int32_t y,
+	int32_t w,
+	int32_t h,
+	int32_t dataLength
+) {
+	const int32_t formatSize = Texture_GetFormatSize(format);
+	const int32_t blockSize = Texture_GetBlockSize(format);
+	int64_t bytes;
+
+	if (formatSize <= 0 || blockSize <= 0)
+	{
+		return 0;
+	}
+	if (level < 0 || level >= levelCount || level >= 31)
+	{
+		FNA3D_LogError(
+			"GetData: mip level %d does not exist in this texture",
+			level
+		);
+		return 0;
+	}
+	if (	x < 0 ||
+		y < 0 ||
+		w <= 0 ||
+		h <= 0 ||
+		w > levelWidth - x ||
+		h > levelHeight - y	)
+	{
+		FNA3D_LogError(
+			"GetData: rectangle (%d, %d, %d, %d) is outside level %d (%dx%d)",
+			x, y, w, h, level, levelWidth, levelHeight
+		);
+		return 0;
+	}
+	bytes = (int64_t) ((w + blockSize - 1) / blockSize) *
+		(int64_t) ((h + blockSize - 1) / blockSize) *
+		(int64_t) formatSize;
+	if (dataLength < 0 || bytes > (int64_t) dataLength)
+	{
+		FNA3D_LogError(
+			"GetData: %d bytes cannot hold a %dx%d rectangle of %d-byte texels",
+			dataLength, w, h, formatSize
+		);
+		return 0;
+	}
+	return 1;
+}
+
 static inline int32_t PrimitiveVerts(
 	FNA3D_PrimitiveType primitiveType,
 	int32_t primitiveCount

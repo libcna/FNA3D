@@ -3352,63 +3352,6 @@ static void OPENGL_INTERNAL_DisposeBackbuffer(OpenGLRenderer *renderer)
  * default of 4, as the upload paths do with GL_UNPACK_ALIGNMENT.
  */
 
-static inline int32_t OPENGL_INTERNAL_MipSize(int32_t size, int32_t level)
-{
-	size >>= level;
-	return SDL_max(size, 1);
-}
-
-static uint8_t OPENGL_INTERNAL_CheckReadback(
-	OpenGLTexture *texture,
-	int32_t level,
-	int32_t levelWidth,
-	int32_t levelHeight,
-	int32_t x,
-	int32_t y,
-	int32_t w,
-	int32_t h,
-	int32_t dataLength
-) {
-	const int32_t formatSize = Texture_GetFormatSize(texture->format);
-	if (formatSize <= 0)
-	{
-		return 0;
-	}
-	if (	level < 0 ||
-		level >= texture->levelCount ||
-		level >= 31	)
-	{
-		FNA3D_LogError(
-			"GetData: mip level %d does not exist in this texture",
-			level
-		);
-		return 0;
-	}
-	if (	x < 0 ||
-		y < 0 ||
-		w <= 0 ||
-		h <= 0 ||
-		w > levelWidth - x ||
-		h > levelHeight - y	)
-	{
-		FNA3D_LogError(
-			"GetData: rectangle (%d, %d, %d, %d) is outside level %d (%dx%d)",
-			x, y, w, h, level, levelWidth, levelHeight
-		);
-		return 0;
-	}
-	if (	dataLength < 0 ||
-		((int64_t) w * (int64_t) h * (int64_t) formatSize) > (int64_t) dataLength	)
-	{
-		FNA3D_LogError(
-			"GetData: %d bytes cannot hold a %dx%d rectangle of %d-byte texels",
-			dataLength, w, h, formatSize
-		);
-		return 0;
-	}
-	return 1;
-}
-
 /* Reads a whole level with glGetTexImage (desktop GL), then copies the rectangle out of it. */
 static void OPENGL_INTERNAL_GetTexImageRect(
 	OpenGLRenderer *renderer,
@@ -4618,10 +4561,11 @@ static void OPENGL_GetTextureData2D(
 		FNA3D_LogError("GetData: mip level %d does not exist in this texture", level);
 		return;
 	}
-	textureWidth = OPENGL_INTERNAL_MipSize(glTexture->twod.width, level);
-	textureHeight = OPENGL_INTERNAL_MipSize(glTexture->twod.height, level);
-	if (!OPENGL_INTERNAL_CheckReadback(
-		glTexture,
+	textureWidth = Texture_GetMipExtent(glTexture->twod.width, level);
+	textureHeight = Texture_GetMipExtent(glTexture->twod.height, level);
+	if (!Texture_CheckReadback(
+		glTexture->format,
+		glTexture->levelCount,
 		level,
 		textureWidth,
 		textureHeight,
@@ -4748,9 +4692,10 @@ static void OPENGL_GetTextureDataCube(
 		FNA3D_LogError("GetData: mip level %d does not exist in this texture", level);
 		return;
 	}
-	textureSize = OPENGL_INTERNAL_MipSize(glTexture->cube.size, level);
-	if (!OPENGL_INTERNAL_CheckReadback(
-		glTexture,
+	textureSize = Texture_GetMipExtent(glTexture->cube.size, level);
+	if (!Texture_CheckReadback(
+		glTexture->format,
+		glTexture->levelCount,
 		level,
 		textureSize,
 		textureSize,

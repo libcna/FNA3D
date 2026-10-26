@@ -220,8 +220,11 @@ static void TestTexture2D(FNA3D_Device *device, const Format *format, int32_t wi
 		CheckRead2D(device, texture, format, level, w, uploads[level],
 			    w - 1, h - 1, 1, 1, what);
 	}
-	CHECK(PackAlignment() == 4, "%s %s: GL_PACK_ALIGNMENT left at %d",
-		what, format->name, PackAlignment());
+	if (SDL_GL_GetCurrentContext() != NULL) /* only the OpenGL driver has pixel-store state */
+	{
+		CHECK(PackAlignment() == 4, "%s %s: GL_PACK_ALIGNMENT left at %d",
+			what, format->name, PackAlignment());
+	}
 	for (level = 0; level < levels; level += 1)
 	{
 		free(uploads[level]);
@@ -265,7 +268,7 @@ static void TestCube(FNA3D_Device *device, const Format *format, int32_t size, i
 }
 
 /* Volume uploads read exactly their tightly packed bytes (each one in its own, exactly sized
- * allocation, so AddressSanitizer sees a read past it). The OpenGL driver has no 3D readback:
+ * allocation, so AddressSanitizer sees a read past it). No driver has a 3D readback:
  * GetTextureData3D must refuse and leave the destination alone.
  */
 static void TestVolume(FNA3D_Device *device, const Format *format, int32_t size, int32_t depth,
@@ -373,6 +376,7 @@ int main(int argc, char **argv)
 	FNA3D_PresentationParameters parameters;
 	FNA3D_Device *device;
 	SDL_Window *window;
+	const char *label;
 	size_t i;
 
 	(void) argc;
@@ -419,11 +423,12 @@ int main(int argc, char **argv)
 		TestAttachedTarget(device, format);
 	}
 	TestRefusals(device);
+	label = (SDL_GL_GetCurrentContext() == NULL) ? "Non-GL driver" : (es3 ? "OpenGL ES 3" : "OpenGL");
 
 	FNA3D_DestroyDevice(device);
 	SDL_DestroyWindow(window);
 	SDL_Quit();
 
-	printf("%s: %d check(s), %d failed\n", es3 ? "OpenGL ES 3" : "OpenGL", checks, failures);
+	printf("%s: %d check(s), %d failed\n", label, checks, failures);
 	return (failures == 0) ? 0 : 1;
 }

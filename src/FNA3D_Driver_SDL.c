@@ -326,6 +326,7 @@ typedef struct SDLGPU_TextureHandle /* Cast from FNA3D_Texture* */
 	SDL_GPUTexture *texture;
 	SDL_GPUTextureCreateInfo createInfo;
 	uint8_t boundAsRenderTarget;
+	FNA3D_SurfaceFormat format; /* CNA: for GetData's size check; textures only */
 } SDLGPU_TextureHandle;
 
 typedef struct SDLGPU_Renderbuffer /* Cast from FNA3D_Renderbuffer* */
@@ -2925,6 +2926,7 @@ static FNA3D_Texture* SDLGPU_CreateTexture2D(
 	int32_t levelCount,
 	uint8_t isRenderTarget
 ) {
+	SDLGPU_TextureHandle *result;
 	SDL_GPUTextureUsageFlags usageFlags = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
 	if (isRenderTarget)
@@ -2932,7 +2934,7 @@ static FNA3D_Texture* SDLGPU_CreateTexture2D(
 		usageFlags |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 	}
 
-	return (FNA3D_Texture*) SDLGPU_INTERNAL_CreateTextureWithHandle(
+	result = SDLGPU_INTERNAL_CreateTextureWithHandle(
 		(SDLGPU_Renderer*) driverData,
 		(uint32_t) width,
 		(uint32_t) height,
@@ -2943,6 +2945,11 @@ static FNA3D_Texture* SDLGPU_CreateTexture2D(
 		usageFlags,
 		SDL_GPU_SAMPLECOUNT_1
 	);
+	if (result != NULL)
+	{
+		result->format = format;
+	}
+	return (FNA3D_Texture*) result;
 }
 
 static FNA3D_Texture* SDLGPU_CreateTexture3D(
@@ -2953,7 +2960,8 @@ static FNA3D_Texture* SDLGPU_CreateTexture3D(
 	int32_t depth,
 	int32_t levelCount
 ) {
-	return (FNA3D_Texture*) SDLGPU_INTERNAL_CreateTextureWithHandle(
+	SDLGPU_TextureHandle *result;
+	result = SDLGPU_INTERNAL_CreateTextureWithHandle(
 		(SDLGPU_Renderer*) driverData,
 		(uint32_t) width,
 		(uint32_t) height,
@@ -2964,6 +2972,11 @@ static FNA3D_Texture* SDLGPU_CreateTexture3D(
 		SDL_GPU_TEXTUREUSAGE_SAMPLER,
 		SDL_GPU_SAMPLECOUNT_1
 	);
+	if (result != NULL)
+	{
+		result->format = format;
+	}
+	return (FNA3D_Texture*) result;
 }
 
 static FNA3D_Texture* SDLGPU_CreateTextureCube(
@@ -2973,6 +2986,7 @@ static FNA3D_Texture* SDLGPU_CreateTextureCube(
 	int32_t levelCount,
 	uint8_t isRenderTarget
 ) {
+	SDLGPU_TextureHandle *result;
 	SDL_GPUTextureUsageFlags usageFlags = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 
 	if (isRenderTarget)
@@ -2980,7 +2994,7 @@ static FNA3D_Texture* SDLGPU_CreateTextureCube(
 		usageFlags |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 	}
 
-	return (FNA3D_Texture*) SDLGPU_INTERNAL_CreateTextureWithHandle(
+	result = SDLGPU_INTERNAL_CreateTextureWithHandle(
 		(SDLGPU_Renderer*) driverData,
 		(uint32_t) size,
 		(uint32_t) size,
@@ -2991,6 +3005,11 @@ static FNA3D_Texture* SDLGPU_CreateTextureCube(
 		usageFlags,
 		SDL_GPU_SAMPLECOUNT_1
 	);
+	if (result != NULL)
+	{
+		result->format = format;
+	}
+	return (FNA3D_Texture*) result;
 }
 
 static FNA3D_Renderbuffer* SDLGPU_GenColorRenderbuffer(
@@ -3815,6 +3834,22 @@ static void SDLGPU_GetTextureData2D(
 ) {
 	SDLGPU_TextureHandle *textureHandle = (SDLGPU_TextureHandle*) texture;
 
+	/* CNA: a level, rectangle or destination that does not fit is refused, not downloaded */
+	if (!Texture_CheckReadback(
+		textureHandle->format,
+		(int32_t) textureHandle->createInfo.num_levels,
+		level,
+		Texture_GetMipExtent((int32_t) textureHandle->createInfo.width, level),
+		Texture_GetMipExtent((int32_t) textureHandle->createInfo.height, level),
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
+		return;
+	}
+
 	SDLGPU_INTERNAL_GetTextureData(
 		(SDLGPU_Renderer*) driverData,
 		textureHandle->texture,
@@ -3862,6 +3897,22 @@ static void SDLGPU_GetTextureDataCube(
 	int32_t dataLength
 ) {
 	SDLGPU_TextureHandle *textureHandle = (SDLGPU_TextureHandle*) texture;
+
+	/* CNA: a level, rectangle or destination that does not fit is refused, not downloaded */
+	if (!Texture_CheckReadback(
+		textureHandle->format,
+		(int32_t) textureHandle->createInfo.num_levels,
+		level,
+		Texture_GetMipExtent((int32_t) textureHandle->createInfo.width, level),
+		Texture_GetMipExtent((int32_t) textureHandle->createInfo.height, level),
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
+		return;
+	}
 
 	SDLGPU_INTERNAL_GetTextureData(
 		(SDLGPU_Renderer*) driverData,

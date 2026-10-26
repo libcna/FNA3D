@@ -3911,8 +3911,9 @@ static void D3D11_GetTextureData2D(
 		0,
 		tex->levelCount
 	);
-	int32_t texW = tex->twod.width >> level;
-	int32_t texH = tex->twod.height >> level;
+	/* CNA: clamped, as creation sizes the levels; a non-square level's short side is 1, not 0 */
+	int32_t texW = Texture_GetMipExtent(tex->twod.width, level);
+	int32_t texH = Texture_GetMipExtent(tex->twod.height, level);
 	D3D11_BOX srcBox = {0, 0, 0, texW, texH, 1};
 	D3D11_MAPPED_SUBRESOURCE subresource;
 	uint8_t *dataPtr = (uint8_t*) data;
@@ -3925,6 +3926,24 @@ static void D3D11_GetTextureData2D(
 		FNA3D_LogError(
 			"GetData with compressed textures unsupported!"
 		);
+		return;
+	}
+
+	/* CNA: the level, the rectangle and the destination must fit; otherwise the copy below would
+	 * read past the mapped level or write past the caller's array.
+	 */
+	if (!Texture_CheckReadback(
+		tex->format,
+		tex->levelCount,
+		level,
+		texW,
+		texH,
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
 		return;
 	}
 
@@ -4058,7 +4077,7 @@ static void D3D11_GetTextureDataCube(
 		0,
 		tex->levelCount
 	);
-	int32_t texSize = tex->cube.size >> level;
+	int32_t texSize = Texture_GetMipExtent(tex->cube.size, level); /* CNA: clamped */
 	D3D11_BOX srcBox = {0, 0, 0, texSize, texSize, 1};
 	D3D11_MAPPED_SUBRESOURCE subresource;
 	uint8_t *dataPtr = (uint8_t*) data;
@@ -4071,6 +4090,24 @@ static void D3D11_GetTextureDataCube(
 		FNA3D_LogError(
 			"GetData with compressed textures unsupported!"
 		);
+		return;
+	}
+
+	/* CNA: the level, the rectangle and the destination must fit; otherwise the copy below would
+	 * read past the mapped level or write past the caller's array.
+	 */
+	if (!Texture_CheckReadback(
+		tex->format,
+		tex->levelCount,
+		level,
+		texSize,
+		texSize,
+		x,
+		y,
+		w,
+		h,
+		dataLength
+	)) {
 		return;
 	}
 

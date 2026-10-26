@@ -9,7 +9,7 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   chains, cube faces, an attached render target -- into buffers with guard bytes behind them, and
   refuse a level, rectangle or destination that does not fit. Cube-face and volume uploads come
   from exactly sized allocations, so a read past the caller's data shows under AddressSanitizer;
-  the OpenGL driver has no volume readback and must leave the destination untouched. Build with
+  no driver has a volume readback, and each must leave the destination untouched. Build with
   `-DCMAKE_C_FLAGS="-fsanitize=address,undefined"` to have the sanitizers watch the driver's own
   temporary buffers as well.
 - `dispose_tests.c`: a texture, two buffers, a renderbuffer and a query disposed from another
