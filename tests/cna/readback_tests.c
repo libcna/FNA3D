@@ -330,7 +330,47 @@ static void TestVolume(FNA3D_Device *device, const Format *format, int32_t size,
 	FNA3D_AddDisposeTexture(device, texture);
 }
 
-/* A render target still attached to the framebuffer: the path that read RGBA8 regardless. */
+/* A render target still attached to the framebuffer: the path that read RGBA8 regardless.
+ *
+ * The target is cleared to (0.25, 0.5, 0.75, 1); where that colour has one encoding -- RGBA8 and
+ * BGRA8 to within rounding, the float and half formats exactly -- the texels must hold it, and
+ * any other format must at least have been written, uniformly, so that a read which does nothing
+ * fails instead of passing on the untouched destination. On ES 3 a format it is not certain to
+ * read may be refused, leaving the destination untouched.
+ */
+static int ExpectedClear(const Format *format, uint8_t *expected, int *tolerance)
+{
+	const float floats[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+	const uint16_t halves[4] = { 0x3400, 0x3800, 0x3A00, 0x3C00 };
+	const uint8_t rgba[4] = { 64, 128, 191, 255 };
+	const uint8_t bgra[4] = { 191, 128, 64, 255 };
+
+	*tolerance = 0;
+	if (format->isFloat && format->isHalf)
+	{
+		memcpy(expected, halves, (size_t) format->texelBytes);
+		return 1;
+	}
+	if (format->isFloat)
+	{
+		memcpy(expected, floats, (size_t) format->texelBytes);
+		return 1;
+	}
+	if (format->format == FNA3D_SURFACEFORMAT_COLOR)
+	{
+		memcpy(expected, rgba, 4);
+		*tolerance = 1;
+		return 1;
+	}
+	if (format->format == FNA3D_SURFACEFORMAT_COLORBGRA_EXT)
+	{
+		memcpy(expected, bgra, 4);
+		*tolerance = 1;
+		return 1;
+	}
+	return 0;
+}
+
 static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 {
 	const int32_t width = 5, height = 3;
@@ -339,7 +379,9 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 	FNA3D_RenderTargetBinding binding;
 	FNA3D_Vec4 color = { 0.25f, 0.5f, 0.75f, 1.0f };
 	uint8_t *buffer = GuardedBuffer(bytes);
-	size_t texel;
+	uint8_t expected[16];
+	int tolerance = 0;
+	size_t texel, i;
 
 	SDL_memset(&binding, '\0', sizeof(binding));
 	binding.type = FNA3D_RENDERTARGET_TYPE_2D;
@@ -352,14 +394,30 @@ static void TestAttachedTarget(FNA3D_Device *device, const Format *format)
 	FNA3D_GetTextureData2D(device, texture, 0, 0, width, height, 0, buffer, (int32_t) bytes);
 	CHECK(GuardIntact(buffer, bytes, GUARD_BYTES),
 		"attached target %s: wrote past %zu bytes", format->name, bytes);
-	if (Readable(format))
+	if (!Readable(format) && Untouched(buffer, bytes))
 	{
+		/* ES 3 refused a layout it cannot return. */
+	}
+	else
+	{
+		CHECK(!Untouched(buffer, bytes),
+			"attached target %s: GetData wrote nothing", format->name);
 		for (texel = 1; texel < (size_t) width * height; texel += 1)
 		{
 			CHECK(memcmp(buffer, buffer + texel * format->texelBytes,
 				     (size_t) format->texelBytes) == 0,
 				"attached target %s: texel %zu differs from texel 0",
 				format->name, texel);
+		}
+		if (ExpectedClear(format, expected, &tolerance))
+		{
+			for (i = 0; i < (size_t) format->texelBytes; i += 1)
+			{
+				const int difference = (int) buffer[i] - (int) expected[i];
+				CHECK(difference >= -tolerance && difference <= tolerance,
+					"attached target %s: byte %zu is %d, the clear colour gives %d",
+					format->name, i, buffer[i], expected[i]);
+			}
 		}
 	}
 	FNA3D_SetRenderTargets(device, NULL, 0, NULL, FNA3D_DEPTHFORMAT_NONE, 0);
