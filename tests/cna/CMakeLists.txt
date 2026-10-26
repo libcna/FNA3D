@@ -80,3 +80,21 @@ set_tests_properties(fna3d_cna_vertex_usage_opengl_es3 PROPERTIES
 add_test(NAME fna3d_cna_vertex_usage_sdlgpu COMMAND fna3d_cna_vertex_usage_tests)
 set_tests_properties(fna3d_cna_vertex_usage_sdlgpu PROPERTIES
 	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")
+
+# The installation, moved away from its prefix, serves an Effect client through find_package and
+# pkg-config (installed_consumer.cmake). No display; FNA3D installs only as a shared library.
+if(BUILD_SHARED_LIBS)
+	add_test(NAME fna3d_cna_installed_consumer COMMAND "${CMAKE_COMMAND}"
+		"-DFNA3D_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+		"-DFNA3D_BUILD_DIR=${PROJECT_BINARY_DIR}"
+		"-DFNA3D_INSTALL_LIBDIR=${FNA3D_INSTALL_LIBDIR}"
+		"-DWORK_DIR=${PROJECT_BINARY_DIR}/tests/cna/installed-consumer"
+		"-DCONSUMER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/installed_consumer"
+		"-DC_COMPILER=${CMAKE_C_COMPILER}"
+		"-DC_FLAGS=${CMAKE_C_FLAGS}"
+		"-DEXE_LINKER_FLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+		"-DGENERATOR=${CMAKE_GENERATOR}"
+		"-DSDL3_DIR=${SDL3_DIR}"
+		-P "${CMAKE_CURRENT_SOURCE_DIR}/installed_consumer.cmake"
+	)
+endif()

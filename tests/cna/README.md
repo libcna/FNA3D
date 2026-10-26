@@ -26,6 +26,12 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   shader that declares `dcl_depth v1` and outputs v1 as its colour must paint a whole-viewport
   triangle in the colour its Depth stream carries, with the element after Position and before
   it; the same draw through `dcl_color v1` and a Color element is the control.
+- `installed_consumer.cmake` (no display): `cmake --install` into the build tree, the
+  installation moved away from its prefix, then the Effect client in `installed_consumer/` --
+  it declares `MOJOSHADER_effectStateChanges` and reads `MOJOSHADER_effect` -- configured,
+  built and run through `find_package(FNA3D)` and, when pkg-config is present, through
+  `pkg-config --define-prefix`; no path into FNA3D's source or build tree may reach its compiler.
+  Registered only with `BUILD_SHARED_LIBS`, as only a shared FNA3D installs.
 - `test_effect.h`: the minimal Effect the drawing tests use, built in memory from the Effects
   Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
