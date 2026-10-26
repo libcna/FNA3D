@@ -89,6 +89,18 @@ void FNA3D_Trace_SetMultiSampleMask(int32_t mask);
 
 void FNA3D_Trace_SetReferenceStencil(int32_t ref);
 
+void FNA3D_Trace_SetXnaPixelCenterEXT(uint8_t enabled);
+
+void FNA3D_Trace_SetLegacyBumpMapEnvEXT(
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+);
+
 void FNA3D_Trace_SetBlendState(
 	FNA3D_BlendState *blendState
 );
@@ -393,6 +405,8 @@ void FNA3D_Trace_SetTextureName(void *texture, const char *text);
 #define TRACE_SETBLENDFACTOR FNA3D_Trace_SetBlendFactor(blendFactor);
 #define TRACE_SETMULTISAMPLEMASK FNA3D_Trace_SetMultiSampleMask(mask);
 #define TRACE_SETREFERENCESTENCIL FNA3D_Trace_SetReferenceStencil(ref);
+#define TRACE_SETXNAPIXELCENTEREXT FNA3D_Trace_SetXnaPixelCenterEXT(enabled);
+#define TRACE_SETLEGACYBUMPMAPENVEXT FNA3D_Trace_SetLegacyBumpMapEnvEXT(sampler, mat00, mat01, mat10, mat11, luminanceScale, luminanceOffset);
 #define TRACE_SETBLENDSTATE FNA3D_Trace_SetBlendState(blendState);
 #define TRACE_SETDEPTHSTENCILSTATE FNA3D_Trace_SetDepthStencilState(depthStencilState);
 #define TRACE_APPLYRASTERIZERSTATE FNA3D_Trace_ApplyRasterizerState(rasterizerState);
@@ -454,6 +468,8 @@ void FNA3D_Trace_SetTextureName(void *texture, const char *text);
 #define TRACE_SETBLENDFACTOR
 #define TRACE_SETMULTISAMPLEMASK
 #define TRACE_SETREFERENCESTENCIL
+#define TRACE_SETXNAPIXELCENTEREXT
+#define TRACE_SETLEGACYBUMPMAPENVEXT
 #define TRACE_SETBLENDSTATE
 #define TRACE_SETDEPTHSTENCILSTATE
 #define TRACE_APPLYRASTERIZERSTATE

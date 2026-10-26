@@ -414,6 +414,9 @@ static inline MOJOSHADER_usage VertexAttribUsage(
 #define MARK_QUERYEND				54
 #define MARK_QUERYPIXELCOUNT			55
 #define MARK_SETSTRINGMARKER			56
+/* CNA: the libcna fork's extension entry points (FNA3D_Tracing.c) */
+#define MARK_SETXNAPIXELCENTEREXT		200
+#define MARK_SETLEGACYBUMPMAPENVEXT		201
 
 static uint8_t compileFromTrace(const char *filename, const char *folder, SDL_IOStream *ops)
 {
@@ -700,6 +703,12 @@ static uint8_t compileFromTrace(const char *filename, const char *folder, SDL_IO
 			break;
 		case MARK_SETREFERENCESTENCIL:
 			READ(ref);
+			break;
+		case MARK_SETXNAPIXELCENTEREXT:
+			SDL_SeekIO(ops, sizeof(uint8_t), SDL_IO_SEEK_CUR);
+			break;
+		case MARK_SETLEGACYBUMPMAPENVEXT:
+			SDL_SeekIO(ops, sizeof(int32_t) + 6 * sizeof(float), SDL_IO_SEEK_CUR);
 			break;
 		case MARK_SETBLENDSTATE:
 			READ(blendState.colorSourceBlend);

@@ -378,6 +378,7 @@ void FNA3D_SetViewport(FNA3D_Device *device, FNA3D_Viewport *viewport)
 
 void FNA3D_SetXnaPixelCenterEXT(FNA3D_Device *device, uint8_t enabled)
 {
+	TRACE_SETXNAPIXELCENTEREXT
 	if (device == NULL)
 	{
 		return;
@@ -395,6 +396,7 @@ void FNA3D_SetLegacyBumpMapEnvEXT(
 	float luminanceScale,
 	float luminanceOffset
 ) {
+	TRACE_SETLEGACYBUMPMAPENVEXT
 	if (device == NULL || sampler < 0 || sampler >= 16)
 	{
 		return;

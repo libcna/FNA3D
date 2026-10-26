@@ -104,6 +104,11 @@ static const uint8_t MARK_QUERYBEGIN			= 53;
 static const uint8_t MARK_QUERYEND			= 54;
 static const uint8_t MARK_QUERYPIXELCOUNT		= 55;
 static const uint8_t MARK_SETSTRINGMARKER		= 56;
+/* CNA: the libcna fork's extension entry points, numbered far from upstream's marks so a future
+ * upstream mark cannot reuse one.
+ */
+static const uint8_t MARK_SETXNAPIXELCENTEREXT		= 200;
+static const uint8_t MARK_SETLEGACYBUMPMAPENVEXT	= 201;
 
 #define TRACE_OBJECT(array, type) \
 	static FNA3D_##type **trace##array = NULL; \
@@ -485,6 +490,43 @@ void FNA3D_Trace_SetMultiSampleMask(int32_t mask)
 	SDL_LockMutex(traceLock);
 	WRITE(MARK_SETMULTISAMPLEMASK);
 	WRITE(mask);
+	SDL_UnlockMutex(traceLock);
+}
+
+void FNA3D_Trace_SetXnaPixelCenterEXT(uint8_t enabled)
+{
+	if (!traceEnabled)
+	{
+		return;
+	}
+	SDL_LockMutex(traceLock);
+	WRITE(MARK_SETXNAPIXELCENTEREXT);
+	WRITE(enabled);
+	SDL_UnlockMutex(traceLock);
+}
+
+void FNA3D_Trace_SetLegacyBumpMapEnvEXT(
+	int32_t sampler,
+	float mat00,
+	float mat01,
+	float mat10,
+	float mat11,
+	float luminanceScale,
+	float luminanceOffset
+) {
+	if (!traceEnabled)
+	{
+		return;
+	}
+	SDL_LockMutex(traceLock);
+	WRITE(MARK_SETLEGACYBUMPMAPENVEXT);
+	WRITE(sampler);
+	WRITE(mat00);
+	WRITE(mat01);
+	WRITE(mat10);
+	WRITE(mat11);
+	WRITE(luminanceScale);
+	WRITE(luminanceOffset);
 	SDL_UnlockMutex(traceLock);
 }
 

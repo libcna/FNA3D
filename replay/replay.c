@@ -104,6 +104,11 @@
 #define MARK_QUERYPIXELCOUNT			55
 #define MARK_SETSTRINGMARKER			56
 #define MARK_SETTEXTURENAME			57
+/* CNA: the libcna fork's extension entry points (FNA3D_Tracing.c). A trace written before they
+ * were traced replays with both at their defaults, pixel centres off and no bump environment.
+ */
+#define MARK_SETXNAPIXELCENTEREXT		200
+#define MARK_SETLEGACYBUMPMAPENVEXT		201
 
 typedef enum
 {
@@ -256,6 +261,11 @@ static void replayOneFrame()
 
 	/* SetReferenceStencil */
 	int32_t ref;
+
+	/* SetXnaPixelCenterEXT, SetLegacyBumpMapEnvEXT */
+	uint8_t pixelCenterEnabled;
+	int32_t bumpSampler;
+	float bumpEnv[6];
 
 	/* SetBlendState */
 	FNA3D_BlendState blendState;
@@ -483,6 +493,24 @@ static void replayOneFrame()
 		case MARK_SETREFERENCESTENCIL:
 			READ(ref);
 			FNA3D_SetReferenceStencil(ctx.device, ref);
+			break;
+		case MARK_SETXNAPIXELCENTEREXT:
+			READ(pixelCenterEnabled);
+			FNA3D_SetXnaPixelCenterEXT(ctx.device, pixelCenterEnabled);
+			break;
+		case MARK_SETLEGACYBUMPMAPENVEXT:
+			READ(bumpSampler);
+			READ(bumpEnv);
+			FNA3D_SetLegacyBumpMapEnvEXT(
+				ctx.device,
+				bumpSampler,
+				bumpEnv[0],
+				bumpEnv[1],
+				bumpEnv[2],
+				bumpEnv[3],
+				bumpEnv[4],
+				bumpEnv[5]
+			);
 			break;
 		case MARK_SETBLENDSTATE:
 			READ(blendState.colorSourceBlend);
