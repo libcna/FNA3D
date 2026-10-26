@@ -3705,6 +3705,28 @@ static void OPENGL_ReadBackbuffer(
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	uint8_t *dataPtr = (uint8_t*) data;
 
+	/* CNA: the rectangle is in the backbuffer's top-left origin and must fit it, and the
+	 * destination must hold w * h RGBA8 texels -- glReadPixels writes exactly that many.
+	 */
+	if (	x < 0 ||
+		y < 0 ||
+		w <= 0 ||
+		h <= 0 ||
+		w > renderer->backbuffer->width - x ||
+		h > renderer->backbuffer->height - y ||
+		dataLength < 0 ||
+		((int64_t) w * (int64_t) h * 4) > (int64_t) dataLength	)
+	{
+		FNA3D_LogError(
+			"GetBackBufferData: rectangle (%d, %d, %d, %d) does not fit the %dx%d "
+			"backbuffer or a %d-byte destination",
+			x, y, w, h,
+			renderer->backbuffer->width, renderer->backbuffer->height,
+			dataLength
+		);
+		return;
+	}
+
 	prevReadBuffer = renderer->currentReadFramebuffer;
 
 	if (renderer->backbuffer->multiSampleCount > 0)
@@ -3747,12 +3769,23 @@ static void OPENGL_ReadBackbuffer(
 			0
 		);
 		BindReadFramebuffer(renderer, renderer->backbuffer->opengl.handle);
+		/* CNA: a blit is clipped by the scissor test, so an enabled scissor left by the last
+		 * draw resolved only that rectangle; ResolveTarget turns it off the same way.
+		 */
+		if (renderer->scissorTestEnable)
+		{
+			renderer->glDisable(GL_SCISSOR_TEST);
+		}
 		renderer->glBlitFramebuffer(
 			0, 0, renderer->backbuffer->width, renderer->backbuffer->height,
 			0, 0, renderer->backbuffer->width, renderer->backbuffer->height,
 			GL_COLOR_BUFFER_BIT,
 			GL_LINEAR
 		);
+		if (renderer->scissorTestEnable)
+		{
+			renderer->glEnable(GL_SCISSOR_TEST);
+		}
 		/* Don't invalidate the backbuffer here! */
 		BindDrawFramebuffer(renderer, prevDrawBuffer);
 		BindReadFramebuffer(renderer, renderer->resolveFramebufferDraw);
@@ -3767,9 +3800,12 @@ static void OPENGL_ReadBackbuffer(
 		);
 	}
 
+	/* CNA: GL's origin is the bottom-left corner. The row flip below fixes the order of the
+	 * rows; the rectangle itself has to be moved to the GL rows that hold it first.
+	 */
 	renderer->glReadPixels(
 		x,
-		y,
+		renderer->backbuffer->height - y - h,
 		w,
 		h,
 		GL_RGBA,
@@ -3782,6 +3818,11 @@ static void OPENGL_ReadBackbuffer(
 	/* Now we get to do a software-based flip! Yes, really! -flibit */
 	pitch = w * 4;
 	temp = (uint8_t*) SDL_malloc(pitch);
+	if (temp == NULL)
+	{
+		FNA3D_LogError("GetBackBufferData: out of memory");
+		return;
+	}
 	for (row = 0; row < h / 2; row += 1)
 	{
 		/* Top to temp, bottom to top, temp to bottom */
