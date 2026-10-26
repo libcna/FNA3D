@@ -34,28 +34,34 @@
 
 /* Packed Pipeline States */
 
+/* CNA: the halves are packed unsigned. As int32_t, an alphaDestinationBlend of 8 or more
+ * (DestinationAlpha and after) or a blend factor alpha of 128 or more (XNA's default is white)
+ * shifted into the sign bit -- undefined behaviour -- and the negative value, sign-extended to
+ * 64 bits, overwrote the other half of the key: the blend functions in a, the multisample mask in
+ * b. Two blend states differing only there then shared one cached pipeline or blend state.
+ */
 PackedState GetPackedBlendState(FNA3D_BlendState blendState)
 {
 	PackedState result;
-	int32_t funcs = (
-		  blendState.alphaBlendFunction << 4
-		| blendState.colorBlendFunction << 0
+	uint32_t funcs = (
+		  (uint32_t) blendState.alphaBlendFunction << 4
+		| (uint32_t) blendState.colorBlendFunction << 0
 	);
-	int32_t blendsAndColorWritesChannels = (
-		  blendState.alphaDestinationBlend << 28
-		| blendState.alphaSourceBlend << 24
-		| blendState.colorDestinationBlend << 20
-		| blendState.colorSourceBlend << 16
-		| blendState.colorWriteEnable << 12
-		| blendState.colorWriteEnable1 << 8
-		| blendState.colorWriteEnable2 << 4
-		| blendState.colorWriteEnable3 << 0
+	uint32_t blendsAndColorWritesChannels = (
+		  (uint32_t) blendState.alphaDestinationBlend << 28
+		| (uint32_t) blendState.alphaSourceBlend << 24
+		| (uint32_t) blendState.colorDestinationBlend << 20
+		| (uint32_t) blendState.colorSourceBlend << 16
+		| (uint32_t) blendState.colorWriteEnable << 12
+		| (uint32_t) blendState.colorWriteEnable1 << 8
+		| (uint32_t) blendState.colorWriteEnable2 << 4
+		| (uint32_t) blendState.colorWriteEnable3 << 0
 	);
-	int32_t blendFactorPacked = (
-		  blendState.blendFactor.r << 0
-		| blendState.blendFactor.g << 8
-		| blendState.blendFactor.b << 16
-		| blendState.blendFactor.a << 24
+	uint32_t blendFactorPacked = (
+		  (uint32_t) blendState.blendFactor.r << 0
+		| (uint32_t) blendState.blendFactor.g << 8
+		| (uint32_t) blendState.blendFactor.b << 16
+		| (uint32_t) blendState.blendFactor.a << 24
 	);
 	result.a = (
 		(uint64_t) funcs << 32 |

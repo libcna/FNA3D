@@ -84,6 +84,20 @@ add_test(NAME fna3d_cna_vertex_usage_sdlgpu COMMAND fna3d_cna_vertex_usage_tests
 set_tests_properties(fna3d_cna_vertex_usage_sdlgpu PROPERTIES
 	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")
 
+# A blend state's pipeline-cache key tells states apart (pipeline_cache_tests.c). No display;
+# FNA3D_PipelineCache.c is compiled into the test.
+add_executable(fna3d_cna_pipeline_cache_tests
+	pipeline_cache_tests.c
+	"${PROJECT_SOURCE_DIR}/src/FNA3D_PipelineCache.c")
+target_include_directories(fna3d_cna_pipeline_cache_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include"
+	"${PROJECT_SOURCE_DIR}/src"
+	"${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_pipeline_cache_tests PRIVATE SDL3::SDL3)
+endif()
+add_test(NAME fna3d_cna_pipeline_cache COMMAND fna3d_cna_pipeline_cache_tests)
+
 # The installation, moved away from its prefix, serves an Effect client through find_package and
 # pkg-config (installed_consumer.cmake). No display; FNA3D installs only as a shared library.
 if(BUILD_SHARED_LIBS)

@@ -1,8 +1,9 @@
 # libcna fork regression tests
 
-Tests for defects fixed on this fork's `cna` branch, built only with `-DFNA3D_CNA_TESTS=ON`. They
+Tests for defects fixed on this fork's `cna` branch, built only with `-DFNA3D_CNA_TESTS=ON`. Most
 open an SDL window and create a real device, so they need a display (in CNA's checkout:
-`tools/platform/run_gpu_tests_private.sh --exec ctest --test-dir <build>`).
+`tools/platform/run_gpu_tests_private.sh --exec ctest --test-dir <build>`); the entries marked
+"no display" below do not.
 
 - `readback_tests.c`: `GetTextureData2D`/`GetTextureDataCube` write exactly the bytes a format and
   rectangle occupy -- every uncompressed format, odd widths, partial rectangles, non-square mip
@@ -27,6 +28,10 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   shader that declares `dcl_depth v1` and outputs v1 as its colour must paint a whole-viewport
   triangle in the colour its Depth stream carries, with the element after Position and before
   it; the same draw through `dcl_color v1` and a Color element is the control.
+- `pipeline_cache_tests.c` (no display): a blend state's pipeline-cache key tells apart states
+  that differ only in a blend function under an alpha destination blend of DestinationAlpha or
+  later, or only in the multisample mask under a white blend factor -- which the int32_t packing's
+  sign extension merged into one key.
 - `installed_consumer.cmake` (no display): `cmake --install` into the build tree, the
   installation moved away from its prefix, then the Effect client in `installed_consumer/` --
   it declares `MOJOSHADER_effectStateChanges` and reads `MOJOSHADER_effect` -- configured,
