@@ -1396,6 +1396,9 @@ static uint8_t compileFromTrace(const char *filename, const char *folder, SDL_IO
 	FREE_TRACES(Renderbuffer)
 	FREE_TRACES(VertexBuffer)
 	FREE_TRACES(IndexBuffer)
+	/* CNA: the effect data table grows with traceEffect and was never freed */
+	SDL_free(traceEffectData);
+	traceEffectData = NULL;
 	FREE_TRACES(Effect)
 	FREE_TRACES(Query)
 	#undef FREE_TRACES
