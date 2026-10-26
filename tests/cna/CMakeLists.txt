@@ -31,3 +31,6 @@ set_tests_properties(fna3d_cna_dispose_opengl PROPERTIES
 add_test(NAME fna3d_cna_dispose_opengl_es3 COMMAND fna3d_cna_dispose_tests)
 set_tests_properties(fna3d_cna_dispose_opengl_es3 PROPERTIES
 	ENVIRONMENT "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+add_test(NAME fna3d_cna_dispose_sdlgpu COMMAND fna3d_cna_dispose_tests)
+set_tests_properties(fna3d_cna_dispose_sdlgpu PROPERTIES
+	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")

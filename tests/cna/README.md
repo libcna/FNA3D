@@ -13,5 +13,6 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   `-DCMAKE_C_FLAGS="-fsanitize=address,undefined"` to have the sanitizers watch the driver's own
   temporary buffers as well.
 - `dispose_tests.c`: a texture, two buffers, a renderbuffer and a query disposed from another
-  thread wait for the next `SwapBuffers`; destroying the device first must still free them. The
-  test counts live SDL allocations through `SDL_SetMemoryFunctions` around a device's lifetime.
+  thread wait for the next `SwapBuffers`; destroying the device first must still free them, and
+  the device its own caches. The test counts live SDL allocations through `SDL_SetMemoryFunctions`
+  around a device's lifetime, on OpenGL, OpenGL ES 3 and the SDL_GPU driver.

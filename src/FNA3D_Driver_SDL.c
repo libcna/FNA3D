@@ -4298,6 +4298,7 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 				renderer->graphicsPipelineHashTable.buckets[i].elements[j].value
 			);
 		}
+		SDL_free(renderer->graphicsPipelineHashTable.buckets[i].elements); /* CNA */
 	}
 
 	for (i = 0; i < renderer->samplerStateArray.count; i += 1)
@@ -4307,6 +4308,7 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 			renderer->samplerStateArray.elements[i].value
 		);
 	}
+	SDL_free(renderer->samplerStateArray.elements); /* CNA */
 
 	SDL_ReleaseGPUTexture(
 		renderer->device,
@@ -4337,6 +4339,7 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 	SDL_DestroyGPUDevice(renderer->device);
 
 	SDL_free(renderer->windows);
+	SDL_free(renderer->boundRenderTargets); /* CNA: the bound-target list was never freed */
 	SDL_free(renderer);
 	SDL_free(device);
 }

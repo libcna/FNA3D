@@ -10,8 +10,8 @@
  */
 
 /* Resources disposed off the device thread are queued for the next SwapBuffers. Destroying the
- * device before that presentation must still free them: every SDL allocation the device made is
- * gone again once FNA3D_DestroyDevice returns.
+ * device before that presentation must still free them, and the device its own caches: every SDL
+ * allocation the device made is gone again once FNA3D_DestroyDevice returns.
  */
 
 #include <stdio.h>
@@ -96,6 +96,7 @@ static int Cycle(SDL_Window *window, int offThread)
 	FNA3D_PresentationParameters parameters;
 	FNA3D_Device *device;
 	DisposeJob job;
+	FNA3D_SamplerState samplerState;
 	SDL_Thread *thread;
 
 	SDL_memset(&parameters, '\0', sizeof(parameters));
@@ -122,6 +123,14 @@ static int Cycle(SDL_Window *window, int offThread)
 	job.query = SDL_GetHintBoolean("FNA3D_OPENGL_FORCE_ES3", false) ?
 		NULL :
 		FNA3D_CreateQuery(device);
+	/* A sampler in the driver's sampler cache, which the SDL_GPU driver keeps in an array. */
+	SDL_memset(&samplerState, '\0', sizeof(samplerState));
+	samplerState.filter = FNA3D_TEXTUREFILTER_LINEAR;
+	samplerState.addressU = FNA3D_TEXTUREADDRESSMODE_CLAMP;
+	samplerState.addressV = FNA3D_TEXTUREADDRESSMODE_CLAMP;
+	samplerState.addressW = FNA3D_TEXTUREADDRESSMODE_CLAMP;
+	samplerState.maxAnisotropy = 4;
+	FNA3D_VerifySampler(device, 0, job.texture, &samplerState);
 	if (offThread)
 	{
 		thread = SDL_CreateThread(DisposeOffThread, "dispose", &job);
