@@ -1,3 +1,5 @@
+The following AI policy is valid since 1st December 2026. Before this day this policy has no effect.
+
 AI must not be used to generate code for contributions to this project.
 
 "AI" in this case means a Large Language Model ("LLM"), such as ChatGPT,
