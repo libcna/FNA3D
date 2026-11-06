@@ -86,6 +86,25 @@ set_tests_properties(fna3d_cna_dispose_sdlgpu PROPERTIES
 
 # The tests that draw build a minimal Effect in memory (test_effect.h) and hand FNA3D_ApplyEffect
 # MojoShader's state-change record, so they see FNA3D's own mojoshader.h.
+
+# FNA3D-7 investigation. Supply the existing CNA stock fixture; do not vendor it.
+add_executable(fna3d_cna_malformed_effect_tests malformed_effect_tests.c)
+target_link_libraries(fna3d_cna_malformed_effect_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_malformed_effect_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_malformed_effect_tests PRIVATE SDL3::SDL3)
+endif()
+set(FNA3D_CNA_BAD_SYMBOL_FIXTURE "" CACHE FILEPATH "Provenance-tracked CNA BasicEffect.fxb for FNA3D-7")
+if(FNA3D_CNA_BAD_SYMBOL_FIXTURE)
+	foreach(driver OpenGL SDLGPU)
+		add_test(NAME fna3d_cna_malformed_effect_${driver}
+			COMMAND fna3d_cna_malformed_effect_tests "${FNA3D_CNA_BAD_SYMBOL_FIXTURE}")
+		set_tests_properties(fna3d_cna_malformed_effect_${driver} PROPERTIES
+			ENVIRONMENT "FNA3D_FORCE_DRIVER=${driver}")
+	endforeach()
+endif()
+
 add_executable(fna3d_cna_backbuffer_tests backbuffer_tests.c)
 target_link_libraries(fna3d_cna_backbuffer_tests PRIVATE FNA3D)
 target_include_directories(fna3d_cna_backbuffer_tests PRIVATE
