@@ -1505,6 +1505,30 @@ static void OPENGL_SwapBuffers(
 
 /* Drawing */
 
+/* XNA DepthStencilState.Apply IL_0154..0242: ordinary stencil is clockwise,
+ * CounterClockwise* is the other face. GL's front face follows the cull state, and
+ * render targets reverse the winding, so select the faces at the draw boundary.
+ */
+static void OPENGL_ApplyStencilFaces(OpenGLRenderer *renderer)
+{
+	GLenum ordinary, counterClockwise;
+	if (!renderer->stencilEnable || !renderer->separateStencilEnable)
+	{
+		return;
+	}
+	ordinary = renderer->frontFace == (renderer->renderTargetBound ? GL_CCW : GL_CW) ?
+		GL_FRONT : GL_BACK;
+	counterClockwise = ordinary == GL_FRONT ? GL_BACK : GL_FRONT;
+	renderer->glStencilFuncSeparate(ordinary, XNAToGL_CompareFunc[renderer->stencilFunc],
+		renderer->stencilRef, renderer->stencilMask);
+	renderer->glStencilFuncSeparate(counterClockwise, XNAToGL_CompareFunc[renderer->ccwStencilFunc],
+		renderer->stencilRef, renderer->stencilMask);
+	renderer->glStencilOpSeparate(ordinary, XNAToGL_GLStencilOp[renderer->stencilFail],
+		XNAToGL_GLStencilOp[renderer->stencilZFail], XNAToGL_GLStencilOp[renderer->stencilPass]);
+	renderer->glStencilOpSeparate(counterClockwise, XNAToGL_GLStencilOp[renderer->ccwStencilFail],
+		XNAToGL_GLStencilOp[renderer->ccwStencilZFail], XNAToGL_GLStencilOp[renderer->ccwStencilPass]);
+}
+
 static void OPENGL_ApplyXnaPixelCenter(
 	OpenGLRenderer *renderer,
 	FNA3D_PrimitiveType primitiveType
@@ -1651,6 +1675,7 @@ static void OPENGL_DrawIndexedPrimitives(
 	uint8_t tps;
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLBuffer *buffer = (OpenGLBuffer*) indices;
+	OPENGL_ApplyStencilFaces(renderer);
 	OPENGL_ApplyXnaPixelCenter(renderer, primitiveType);
 
 	BindIndexBuffer(renderer, buffer->handle);
@@ -1712,6 +1737,7 @@ static void OPENGL_DrawInstancedPrimitives(
 	uint8_t tps;
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLBuffer *buffer = (OpenGLBuffer*) indices;
+	OPENGL_ApplyStencilFaces(renderer);
 	OPENGL_ApplyXnaPixelCenter(renderer, primitiveType);
 
 	SDL_assert(renderer->supports_ARB_draw_instanced);
@@ -1764,6 +1790,7 @@ static void OPENGL_DrawPrimitives(
 ) {
 	uint8_t tps;
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
+	OPENGL_ApplyStencilFaces(renderer);
 	OPENGL_ApplyXnaPixelCenter(renderer, primitiveType);
 
 	tps = (	renderer->togglePointSprite &&
@@ -2366,6 +2393,7 @@ static void OPENGL_VerifySampler(
 ) {
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 	OpenGLTexture *tex = (OpenGLTexture*) texture;
+	int32_t baseLevel;
 
 	if (texture == NULL)
 	{
@@ -2386,13 +2414,21 @@ static void OPENGL_VerifySampler(
 		return;
 	}
 
+	/* XNA forwards MaxMipLevel as uint32 (SamplerState.Apply IL_0342..0355).
+	 * Do not make the GL texture incomplete by selecting a nonexistent base.
+	 * External textures have no retained level count: leave their old policy.
+	 */
+	baseLevel = tex->levelCount > 0 ?
+		(int32_t) SDL_min((uint32_t) sampler->maxMipLevel, (uint32_t) (tex->levelCount - 1)) :
+		sampler->maxMipLevel;
+
 	if (	tex == renderer->textures[index] &&
 		sampler->addressU == tex->wrapS &&
 		sampler->addressV == tex->wrapT &&
 		sampler->addressW == tex->wrapR &&
 		sampler->filter == tex->filter &&
 		sampler->maxAnisotropy == tex->anisotropy &&
-		sampler->maxMipLevel == tex->maxMipmapLevel &&
+		baseLevel == tex->maxMipmapLevel &&
 		sampler->mipMapLevelOfDetailBias == tex->lodBias	)
 	{
 		/* Nothing's changing, forget it. */
@@ -2473,9 +2509,9 @@ static void OPENGL_VerifySampler(
 			);
 		}
 	}
-	if (sampler->maxMipLevel != tex->maxMipmapLevel)
+	if (baseLevel != tex->maxMipmapLevel)
 	{
-		tex->maxMipmapLevel = sampler->maxMipLevel;
+		tex->maxMipmapLevel = baseLevel;
 		renderer->glTexParameteri(
 			tex->target,
 			GL_TEXTURE_BASE_LEVEL,

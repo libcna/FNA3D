@@ -1880,7 +1880,11 @@ static SDL_GPUSampler* SDLGPU_INTERNAL_FetchSamplerState(
 	samplerCreateInfo.max_anisotropy = (float) SDL_max(1, samplerState->maxAnisotropy);
 	samplerCreateInfo.enable_compare = 0;
 	samplerCreateInfo.compare_op = 0;
-	samplerCreateInfo.min_lod = (float) samplerState->maxMipLevel;
+	/* XNA SamplerState.Apply IL_0342..0355 forwards a uint32 sampler value.
+	 * SDL has no more than a full uint32 mip chain; bound the float clamp so
+	 * it stays below max_lod even for negative managed values.
+	 */
+	samplerCreateInfo.min_lod = (float) SDL_min((uint32_t) samplerState->maxMipLevel, 32u);
 	samplerCreateInfo.max_lod = 1000.0f;
 	samplerCreateInfo.props = 0;
 
@@ -3131,6 +3135,15 @@ static void SDLGPU_INTERNAL_SetTextureData(
 	bool cycleTexture
 ) {
 	SDL_LockMutex(renderer->commandLock);
+
+	/* Preserve API order: submit earlier uploads and draws before recording this
+	 * update. Partial, cube, volume and mipped updates must retain the other texels,
+	 * so cycling the entire destination cannot replace this ordering boundary.
+	 */
+	if (renderer->nextRenderPassColorAttachmentCount > 0)
+	{
+		SDLGPU_INTERNAL_FlushCommands(renderer);
+	}
 
 	SDL_GPUTextureRegion textureRegion;
 	SDL_GPUTextureTransferInfo textureCopyParams;

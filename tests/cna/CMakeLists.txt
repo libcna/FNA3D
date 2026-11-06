@@ -5,6 +5,27 @@
 # on a desktop context and once on an OpenGL ES 3 one (FNA3D_OPENGL_FORCE_ES3), and on the SDL_GPU
 # driver; on Windows FNA3D_FORCE_DRIVER=D3D11 runs the same executables on Direct3D 11.
 
+
+# texture_order: native API contract, independent of CNA's adapters.
+add_executable(fna3d_cna_texture_order_tests texture_order_tests.c)
+target_link_libraries(fna3d_cna_texture_order_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_texture_order_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_texture_order_tests PRIVATE SDL3::SDL3)
+endif()
+foreach(variant opengl opengl_es3 sdlgpu)
+	add_test(NAME fna3d_cna_texture_order_${variant} COMMAND fna3d_cna_texture_order_tests)
+	if(variant STREQUAL "opengl_es3")
+		set(environment "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+	elseif(variant STREQUAL "opengl")
+		set(environment "FNA3D_FORCE_DRIVER=OpenGL")
+	else()
+		set(environment "FNA3D_FORCE_DRIVER=SDLGPU")
+	endif()
+	set_tests_properties(fna3d_cna_texture_order_${variant} PROPERTIES ENVIRONMENT "${environment}")
+endforeach()
+
 add_executable(fna3d_cna_readback_tests readback_tests.c)
 target_link_libraries(fna3d_cna_readback_tests PRIVATE FNA3D)
 target_include_directories(fna3d_cna_readback_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
@@ -21,6 +42,27 @@ set_tests_properties(fna3d_cna_readback_opengl_es3 PROPERTIES
 add_test(NAME fna3d_cna_readback_sdlgpu COMMAND fna3d_cna_readback_tests)
 set_tests_properties(fna3d_cna_readback_sdlgpu PROPERTIES
 	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")
+
+
+# mip_clamp: native API contract, independent of CNA's adapters.
+add_executable(fna3d_cna_mip_clamp_tests mip_clamp_tests.c)
+target_link_libraries(fna3d_cna_mip_clamp_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_mip_clamp_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_mip_clamp_tests PRIVATE SDL3::SDL3)
+endif()
+foreach(variant opengl opengl_es3 sdlgpu)
+	add_test(NAME fna3d_cna_mip_clamp_${variant} COMMAND fna3d_cna_mip_clamp_tests)
+	if(variant STREQUAL "opengl_es3")
+		set(environment "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+	elseif(variant STREQUAL "opengl")
+		set(environment "FNA3D_FORCE_DRIVER=OpenGL")
+	else()
+		set(environment "FNA3D_FORCE_DRIVER=SDLGPU")
+	endif()
+	set_tests_properties(fna3d_cna_mip_clamp_${variant} PROPERTIES ENVIRONMENT "${environment}")
+endforeach()
 
 add_executable(fna3d_cna_dispose_tests dispose_tests.c)
 target_link_libraries(fna3d_cna_dispose_tests PRIVATE FNA3D)
@@ -320,3 +362,19 @@ if(TRACING_SUPPORT AND TARGET fna3d_replay)
 		set_tests_properties(fna3d_cna_trace_${variant} PROPERTIES ENVIRONMENT "${environment}")
 	endforeach()
 endif()
+
+# Window-free coverage executes the actual driver entry points with captured native calls.
+add_executable(fna3d_cna_opengl_state_tests opengl_state_tests.c)
+target_link_libraries(fna3d_cna_opengl_state_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_opengl_state_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/MojoShader")
+add_test(NAME fna3d_cna_opengl_state COMMAND fna3d_cna_opengl_state_tests)
+
+add_executable(fna3d_cna_sdlgpu_command_tests sdlgpu_command_tests.c "${PROJECT_SOURCE_DIR}/src/FNA3D_PipelineCache.c")
+target_link_libraries(fna3d_cna_sdlgpu_command_tests PRIVATE mojoshader ${LOBJC})
+target_include_directories(fna3d_cna_sdlgpu_command_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_sdlgpu_command_tests PRIVATE SDL3::SDL3)
+endif()
+add_test(NAME fna3d_cna_sdlgpu_command COMMAND fna3d_cna_sdlgpu_command_tests)

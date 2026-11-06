@@ -183,6 +183,64 @@ static void Run(FNA3D_Device *device, FNA3D_Effect *effect, FNA3D_Buffer *vertex
 	}
 }
 
+/* Ordinary stencil Replace writes 5; counter-clockwise Invert writes 255 from
+ * zero (XNA DepthStencilState.Apply IL_0154..0242). VFACE supplies independent
+ * green/red probe colours. Precede CullNone by each cull mode, on both targets.
+ */
+static void RunStencil(FNA3D_Device *device, FNA3D_Effect *effect, FNA3D_Buffer *vertexBuffer,
+	FNA3D_Texture *target, FNA3D_Renderbuffer *depth)
+{
+	FNA3D_CullMode prior;
+	FNA3D_RasterizerState rasterizer;
+	FNA3D_DepthStencilState stencil;
+	FNA3D_RenderTargetBinding binding;
+	FNA3D_Vec4 blue = {0, 0, 1, 1};
+	uint8_t pixels[WIDTH * HEIGHT * 4];
+	int probe;
+	SDL_zero(binding);
+	binding.type = FNA3D_RENDERTARGET_TYPE_2D;
+	binding.twod.width = WIDTH; binding.twod.height = HEIGHT;
+	binding.levelCount = 1; binding.texture = target;
+	FNA3D_SetRenderTargets(device, target ? &binding : NULL, target ? 1 : 0,
+		target ? depth : NULL, FNA3D_DEPTHFORMAT_D24S8, 1);
+	for (prior = FNA3D_CULLMODE_NONE; prior <= FNA3D_CULLMODE_CULLCOUNTERCLOCKWISEFACE; prior += 1)
+	{
+		Draw(device, effect, vertexBuffer, prior); /* control also establishes the bindings */
+		SDL_zero(rasterizer);
+		rasterizer.fillMode = FNA3D_FILLMODE_SOLID;
+		rasterizer.cullMode = FNA3D_CULLMODE_NONE;
+		rasterizer.multiSampleAntiAlias = 1;
+		FNA3D_ApplyRasterizerState(device, &rasterizer);
+		FNA3D_Clear(device, FNA3D_CLEAROPTIONS_TARGET | FNA3D_CLEAROPTIONS_STENCIL, &blue, 1, 0);
+		SDL_zero(stencil);
+		stencil.stencilEnable = 1; stencil.twoSidedStencilMode = 1;
+		stencil.stencilMask = stencil.stencilWriteMask = -1;
+		stencil.stencilFunction = stencil.ccwStencilFunction = FNA3D_COMPAREFUNCTION_ALWAYS;
+		stencil.referenceStencil = 5;
+		stencil.stencilPass = FNA3D_STENCILOPERATION_REPLACE;
+		stencil.ccwStencilPass = FNA3D_STENCILOPERATION_INVERT;
+		FNA3D_SetDepthStencilState(device, &stencil);
+		FNA3D_DrawPrimitives(device, FNA3D_PRIMITIVETYPE_TRIANGLELIST, 0, 2);
+		for (probe = 0; probe < 2; probe += 1)
+		{
+			FNA3D_Clear(device, FNA3D_CLEAROPTIONS_TARGET, &blue, 1, 0);
+			stencil.twoSidedStencilMode = 0;
+			stencil.referenceStencil = probe ? 255 : 5;
+			stencil.stencilFunction = FNA3D_COMPAREFUNCTION_EQUAL;
+			stencil.stencilWriteMask = 0;
+			stencil.stencilPass = FNA3D_STENCILOPERATION_KEEP;
+			FNA3D_SetDepthStencilState(device, &stencil);
+			FNA3D_DrawPrimitives(device, FNA3D_PRIMITIVETYPE_TRIANGLELIST, 0, 2);
+			if (target)
+				FNA3D_GetTextureData2D(device, target, 0, 0, WIDTH, HEIGHT, 0, pixels, sizeof(pixels));
+			else FNA3D_ReadBackbuffer(device, 0, 0, WIDTH, HEIGHT, pixels, sizeof(pixels));
+			Expect(pixels, probe ? CLEARED : GREEN, probe ? RED : CLEARED,
+				"two-sided stencil after previous cull mode");
+		}
+	}
+	FNA3D_SetRenderTargets(device, NULL, 0, NULL, FNA3D_DEPTHFORMAT_D24S8, 1);
+}
+
 int main(int argc, char **argv)
 {
 	FNA3D_PresentationParameters parameters;
@@ -192,6 +250,7 @@ int main(int argc, char **argv)
 	MOJOSHADER_effect *effectData = NULL;
 	FNA3D_Buffer *vertexBuffer;
 	FNA3D_Texture *target;
+	FNA3D_Renderbuffer *depth;
 	TestEffect code;
 
 	(void) argc;
@@ -213,7 +272,7 @@ int main(int argc, char **argv)
 	parameters.backBufferHeight = HEIGHT;
 	parameters.backBufferFormat = FNA3D_SURFACEFORMAT_COLOR;
 	parameters.deviceWindowHandle = window;
-	parameters.depthStencilFormat = FNA3D_DEPTHFORMAT_NONE;
+	parameters.depthStencilFormat = FNA3D_DEPTHFORMAT_D24S8;
 	parameters.presentationInterval = FNA3D_PRESENTINTERVAL_IMMEDIATE;
 	device = FNA3D_CreateDevice(&parameters, 0);
 	if (device == NULL)
@@ -244,6 +303,10 @@ int main(int argc, char **argv)
 
 	Run(device, effect, vertexBuffer, NULL, "backbuffer");
 	Run(device, effect, vertexBuffer, target, "render target");
+	depth = FNA3D_GenDepthStencilRenderbuffer(device, WIDTH, HEIGHT, FNA3D_DEPTHFORMAT_D24S8, 0);
+	RunStencil(device, effect, vertexBuffer, NULL, NULL);
+	RunStencil(device, effect, vertexBuffer, target, depth);
+	FNA3D_AddDisposeRenderbuffer(device, depth);
 
 	FNA3D_AddDisposeTexture(device, target);
 	FNA3D_AddDisposeVertexBuffer(device, vertexBuffer);

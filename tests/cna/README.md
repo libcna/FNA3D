@@ -100,3 +100,45 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   Framework format (no Effect compiler runs here): a vs_2_0 that passes POSITION0 to `oPos` and
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
   up to four passes.
+
+### 2026-11-06 CNA quality regressions
+
+- `opengl_state_tests.c` (no display): compiles the actual OpenGL driver into the test and captures
+  its GL calls. Ordinary, indexed and instanced draw entry points must map all two-sided stencil
+  operations and comparisons onto XNA's clockwise face for both GL front-face values and both
+  destinations. Its mip cases send 0, 1, 2, -1, 99, 0 to a three-level texture, requiring stored
+  base levels 0, 1, 2, 2, 2, 0 and the same cached state. XNA Refresh `DepthStencilState.Apply`
+  IL_0154–0242 and `SamplerState.Apply` IL_0342–0355 are the managed oracles; no GL context is used.
+- `sdlgpu_command_tests.c` (no display): executes the actual SDL GPU driver with submission,
+  upload and sampler creation calls captured. Existing uploads/rendering, including a deferred
+  clear, must be submitted before a later 2D/mipmapped/cube/volume update is recorded. The split
+  must invalidate draw bindings, retain upload extents/face, and leave startup dummy uploads
+  alone before attachments exist. Sampler cases require unsigned mip bounds and native cache
+  reuse. These call-boundary checks complement rather than replace GPU pixels. Both window-free
+  executables run their whole set by default; `stencil`/`mips` and `ordering`/`mips` arguments
+  respectively select a case group for baseline/mutation evidence.
+- `vface_tests.c` also probes actual two-sided stencil pixels on the backbuffer and a D24S8
+  render target, after each prior cull mode. Ordinary Replace=5 and CCW Invert(0)=255 select the
+  literal green/red triangle centers independently of VFACE's own sign correction.
+- `texture_order_tests.c` (display required): direct SM2 texture sampling draws red left, changes
+  the texture to green, draws right, and only then reads pixels. The whole single-level 2D case
+  controls cycling; mipmapped 2D, cube and volume cases cover the shared upload-order boundary.
+  Higher-mip cases also require mip sampling to work; use `mip_clamp_tests.c` to distinguish a
+  sampling failure from upload ordering. No vertex-buffer data changes occur between draws.
+- `mip_clamp_tests.c` (display required): verifies native per-mip upload/readback identity before
+  direct sampling of distinct red/green/blue mips. Requests 0,1,2,-1,99,0 must select stored levels
+  0,1,2,2,2,0. This bypasses CNA's SpriteBatch and cannot by itself attribute a CNA-only failure.
+- `malformed_effect_tests.c` (display required; investigation only): takes an existing
+  provenance-tracked `BasicEffect.fxb` argument; checks its byte 25018 is 0x6f, compiles a valid
+  control, then XORs 0x10 and requires a normal `Shader parameter not found in effect.` error
+  and normal disposal. Supply `FNA3D_CNA_BAD_SYMBOL_FIXTURE` to register its OpenGL/SDLGPU CTests,
+  or run `fna3d_cna_malformed_effect_tests <fixture>` with explicit `FNA3D_FORCE_DRIVER`. Markers
+  surround compilation/disposal for an ASan/gdb trace. No FNA3D-7 production fix is implied.
+
+Window-free tests, after a focused build, can run as:
+
+    env -u DISPLAY -u WAYLAND_DISPLAY SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy \
+      ctest --test-dir build -R '^fna3d_cna_(opengl_state|sdlgpu_command|pipeline_cache|sdlgpu_properties)$' --output-on-failure
+
+The native tests require the owner's private GPU runner; a headless pass is not native-pixel
+qualification. FNA3D-8 presentation and FNA3D-3 sample-mask support remain outside these repairs.
