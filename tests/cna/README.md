@@ -176,3 +176,12 @@ Every 64x32 pixel must match. These add 24 draws per driver to the existing 24
 register-remapping draws, for 48 per driver across OpenGL, OpenGL ES 3 and SDL_GPU.
 The old MojoShader pin passes both GLSL controls but refuses the 24 new SDL_GPU
 programs. This is the public FNA3D Effect path, with no CNA adapter involved.
+
+### Zero-result pixel observation (TQ-TEXREG-ZERO-01)
+
+Native targets start with a distinct nonzero RGBA clear color. A signed TEXDP3
+result of zero therefore requires an actual fragment write. A valid SPIR-V
+control-flow mutation that kills only those fragments passed with the former
+zero background; the nonzero background catches all six dropped-output cases.
+All existing literal color expectations remain in place. The mutation is restored
+byte-for-byte before the pristine native harness is run.

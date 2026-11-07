@@ -77,7 +77,7 @@ int main(void)
 	uint8_t grid[4 * 4 * 4], pixels[TW * TH * 4];
 	FNA3D_Texture *sourceTexture, *lookupTexture;
 	FNA3D_SamplerState sampler;
-	FNA3D_Vec4 clear = {0, 0, 0, 0};
+	FNA3D_Vec4 clear = {.2f, .4f, .6f, .8f};
 	int x, y, variant, source, destination, stage, cases = 0;
 	if (!Start())
 		return 1;
