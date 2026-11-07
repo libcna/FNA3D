@@ -101,6 +101,19 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
   up to four passes.
 
+### 2026-11-07 device startup and deferred clears
+
+- `startup_tests.c` creates a real debug device before the caller supplies any
+  viewport, effect or draw. `startup_tests.cmake` rejects native validation messages
+  on stdout/stderr, including Vulkan output that bypasses SDL's log callback. All
+  three drivers run it. Initial texture uploads must not invent an empty render
+  pass with an unset viewport.
+- `sdlgpu_command_tests.c` also covers the already-attached faux backbuffer before
+  the first viewport. Its `passes` group executes every combination of pending
+  color/depth/stencil clears: no work starts no pass, and a pending clear starts
+  one pass with the exact load operations and literal clear values. Existing upload
+  ordering, clear-only submission and mip assertions remain in the default suite.
+
 ### 2026-11-07 dependent register texture reads
 
 - `texreg_tests.c`: `texreg2ar`, `texreg2gb`, `texreg2rgb` and `texreg2rgb_bx2`

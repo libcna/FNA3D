@@ -44,6 +44,28 @@ set_tests_properties(fna3d_cna_readback_sdlgpu PROPERTIES
 	ENVIRONMENT "FNA3D_FORCE_DRIVER=SDLGPU")
 
 
+# Device creation is observable before the caller supplies its first viewport.
+add_executable(fna3d_cna_startup_tests startup_tests.c)
+target_link_libraries(fna3d_cna_startup_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_startup_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_startup_tests PRIVATE SDL3::SDL3)
+endif()
+foreach(variant opengl opengl_es3 sdlgpu)
+	add_test(NAME fna3d_cna_startup_${variant} COMMAND "${CMAKE_COMMAND}"
+		"-DSTARTUP_EXE=$<TARGET_FILE:fna3d_cna_startup_tests>"
+		-P "${CMAKE_CURRENT_SOURCE_DIR}/startup_tests.cmake")
+	if(variant STREQUAL "opengl_es3")
+		set(environment "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
+	elseif(variant STREQUAL "opengl")
+		set(environment "FNA3D_FORCE_DRIVER=OpenGL")
+	else()
+		set(environment "FNA3D_FORCE_DRIVER=SDLGPU")
+	endif()
+	set_tests_properties(fna3d_cna_startup_${variant} PROPERTIES ENVIRONMENT "${environment}" TIMEOUT 120)
+endforeach()
+
 # Register-dependent ps_1.x sampling: literal native pixels, independent of CNA adapters.
 add_executable(fna3d_cna_texreg_tests texreg_tests.c)
 target_link_libraries(fna3d_cna_texreg_tests PRIVATE FNA3D)

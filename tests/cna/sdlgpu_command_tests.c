@@ -35,10 +35,12 @@ static void SDLCALL TestUpload(SDL_GPUCopyPass*, const SDL_GPUTextureTransferInf
 #include "FNA3D_Driver_SDL.c"
 
 static int checks, failures, event, submitted, priorRenderAt, uploadedAt, clearAt, acquired;
-static int samplerCalls;
+static int samplerCalls, renderPassCalls;
 static bool cycled;
 static SDL_GPUCommandBuffer *priorRender;
 static SDL_GPUSamplerCreateInfo samplerInfo;
+static SDL_GPUColorTargetInfo seenColor;
+static SDL_GPUDepthStencilTargetInfo seenDepth;
 static SDL_GPUTextureRegion uploadedRegion;
 static char commandTokens[64], samplerToken, copyToken, renderToken, textureToken, transferToken;
 static uint8_t transferBytes[256];
@@ -70,14 +72,17 @@ static void SDLCALL TestEndRender(SDL_GPURenderPass *pass) { (void)pass; }
 static SDL_GPURenderPass * SDLCALL TestRender(SDL_GPUCommandBuffer *command,
 	const SDL_GPUColorTargetInfo *colors, Uint32 count, const SDL_GPUDepthStencilTargetInfo *depth)
 {
-	(void)command; (void)depth;
+	(void)command; (void)depth; renderPassCalls++;
 	CHECK(count == 1, "a deferred render pass has a real attachment");
+	if (count == 1) seenColor = colors[0];
+	if (depth != NULL) seenDepth = *depth;
 	if (count == 1 && colors[0].load_op == SDL_GPU_LOADOP_CLEAR) clearAt = ++event;
 	return (SDL_GPURenderPass*)&renderToken;
 }
 static void SDLCALL TestViewport(SDL_GPURenderPass *pass, const SDL_GPUViewport *viewport)
 {
-	(void)pass; (void)viewport;
+	(void)pass;
+	CHECK(viewport->w > 0 && viewport->h > 0, "a submitted viewport has positive dimensions");
 }
 static void SDLCALL TestScissor(SDL_GPURenderPass *pass, const SDL_Rect *rect) { (void)pass; (void)rect; }
 static void * SDLCALL TestMap(SDL_GPUDevice *device, SDL_GPUTransferBuffer *buffer, bool cycle)
@@ -130,19 +135,20 @@ static void Ordering(void)
 {
 	/* Ordered native SetData/draw contract: earlier uploads U0 then rendering
 	 * R0 must be submitted BEFORE recording U1. A clear-only render pass also
-	 * has to be materialized before its submission. Initial dummy uploads,
-	 * before any render target exists, must not start an attachment-less pass.
+	 * has to be materialized before its submission. Initial dummy uploads
+	 * before attachments must not flush; after attachments exist they must not
+	 * invent an empty render pass before the caller supplies a viewport.
 	 */
 	int kind;
 	where = "upload API order";
-	for (kind = 0; kind < 6; kind++)
+	for (kind = 0; kind < 7; kind++)
 	{
 		SDLGPU_Renderer r;
 		SDLGPU_TextureHandle texture, color;
 		SDLGPU_TextureHandle *bound[4];
 		uint8_t bytes[256] = {0};
 		SDL_zero(r); SDL_zero(texture); SDL_zero(color);
-		event = submitted = priorRenderAt = uploadedAt = clearAt = 0; acquired = 2;
+		event = submitted = priorRenderAt = uploadedAt = clearAt = renderPassCalls = 0; acquired = 2;
 		r.commandLock = SDL_CreateMutex();
 		r.uploadCommandBuffer = (SDL_GPUCommandBuffer*)&commandTokens[0];
 		r.renderCommandBuffer = priorRender = (SDL_GPUCommandBuffer*)&commandTokens[1];
@@ -153,6 +159,11 @@ static void Ordering(void)
 		r.nextRenderPassColorAttachments[0] = &color;
 		r.boundRenderTargets = bound; r.boundRenderTargetCapacity = 4;
 		r.viewport.w = r.viewport.h = 4;
+		if (kind == 6)
+		{
+			r.renderPass = NULL; r.needNewRenderPass = 1;
+			r.viewport.w = r.viewport.h = 0;
+		}
 		texture.texture = color.texture = (SDL_GPUTexture*)&textureToken;
 		texture.createInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 		texture.createInfo.width = texture.createInfo.height = 4;
@@ -173,6 +184,7 @@ static void Ordering(void)
 			CHECK(r.needVertexBufferBind && r.needVertexSamplerBind && r.needFragmentSamplerBind,
 				"the split invalidates bindings for the next render command buffer");
 		}
+		if (kind == 6) CHECK(renderPassCalls == 0, "uploads before the first viewport do not invent an empty render pass");
 		if (kind == 4) CHECK(clearAt > 0 && clearAt < priorRenderAt, "clear-only work is not lost at the split");
 		CHECK(cycled == (kind != 1 && kind != 2 && kind != 3), "only complete single-level 2D updates cycle");
 		CHECK(uploadedRegion.texture == texture.texture && uploadedRegion.w == 4 && uploadedRegion.h == 4,
@@ -182,10 +194,54 @@ static void Ordering(void)
 		SDL_DestroyMutex(r.commandLock);
 	}
 }
+static void DeferredPasses(void)
+{
+	/* EndRenderPass materializes exactly pending clears, including depth-only
+	 * and stencil-only ones. With no draw or clear it must record nothing. */
+	int mask;
+	where = "deferred render pass";
+	for (mask = 0; mask < 8; mask++)
+	{
+		SDLGPU_Renderer r;
+		SDLGPU_TextureHandle color, depth;
+		SDLGPU_TextureHandle *bound[4];
+		SDL_zero(r); SDL_zero(color); SDL_zero(depth);
+		SDL_zero(seenColor); SDL_zero(seenDepth);
+		r.needNewRenderPass = 1;
+		r.shouldClearColorOnBeginPass = (mask & 1) != 0;
+		r.shouldClearDepthOnBeginPass = (mask & 2) != 0;
+		r.shouldClearStencilOnBeginPass = (mask & 4) != 0;
+		r.nextRenderPassColorAttachmentCount = 1;
+		r.nextRenderPassColorAttachments[0] = &color;
+		r.nextRenderPassDepthStencilAttachment = &depth;
+		r.boundRenderTargets = bound; r.boundRenderTargetCapacity = 4;
+		r.viewport.w = r.viewport.h = 4;
+		color.texture = depth.texture = (SDL_GPUTexture*)&textureToken;
+		color.createInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		depth.createInfo.format = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+		color.createInfo.sample_count = depth.createInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+		r.clearColorValue.r = 0.25f; r.clearDepthValue = 0.75f; r.clearStencilValue = 37;
+		renderPassCalls = 0;
+		SDLGPU_INTERNAL_EndRenderPass(&r);
+		CHECK(renderPassCalls == (mask != 0), "only a pending clear starts a render pass");
+		CHECK(r.renderPass == NULL && r.needNewRenderPass, "the materialized pass is closed");
+		CHECK(!r.shouldClearColorOnBeginPass && !r.shouldClearDepthOnBeginPass &&
+			!r.shouldClearStencilOnBeginPass, "every pending clear was consumed");
+		if (mask != 0)
+		{
+			CHECK(seenColor.load_op == ((mask & 1) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD), "color clear flag reaches SDL");
+			CHECK(seenDepth.load_op == ((mask & 2) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD), "depth clear flag reaches SDL");
+			CHECK(seenDepth.stencil_load_op == ((mask & 4) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD), "stencil clear flag reaches SDL");
+			if (mask & 1) CHECK(seenColor.clear_color.r == 0.25f, "literal clear color reaches SDL");
+			CHECK(seenDepth.clear_depth == 0.75f && seenDepth.clear_stencil == 37, "literal depth and stencil clear values reach SDL");
+		}
+	}
+}
 int main(int argc, char **argv)
 {
 	if (argc == 1 || SDL_strcmp(argv[1], "ordering") == 0) Ordering();
 	if (argc == 1 || SDL_strcmp(argv[1], "mips") == 0) Mips();
+	if (argc == 1 || SDL_strcmp(argv[1], "passes") == 0) DeferredPasses();
 	printf("SDL GPU command boundary: %d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;
 }

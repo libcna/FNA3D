@@ -761,7 +761,10 @@ static void SDLGPU_INTERNAL_EndRenderPass(
 	 * can have the clear execute instead of silently discarding it.
 	 * -flibit
 	 */
-	if (renderer->needNewRenderPass)
+	if (renderer->needNewRenderPass && (
+		renderer->shouldClearColorOnBeginPass ||
+		renderer->shouldClearDepthOnBeginPass ||
+		renderer->shouldClearStencilOnBeginPass))
 	{
 		SDLGPU_INTERNAL_BeginRenderPass(renderer);
 	}
