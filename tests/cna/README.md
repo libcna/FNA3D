@@ -101,6 +101,16 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   its COLOR0 or DEPTH0 input to `oD0`, and a ps_2_0 that writes that colour, in one technique of
   up to four passes.
 
+### 2026-11-07 dependent register texture reads
+
+- `texreg_tests.c`: `texreg2ar`, `texreg2gb`, `texreg2rgb` and `texreg2rgb_bx2`
+  each render all six legal source/destination pairs among t0..t3. A one-texel source
+  `(32,96,160,224)` selects a hand-derived texel in a distinct 4x4 point-clamped lookup;
+  all 64x32 pixels must match its literal RGBA bytes. The three native drivers run
+  24 draws each. A vs_2_0 supplies every implicit ps_1_2 texture input. No CNA adapter,
+  stock effect or tolerance is involved. This public FNA3D path tests 2D textures;
+  cube/volume mappings are covered separately by MojoShader's sampler-map tests.
+
 ### 2026-11-06 CNA quality regressions
 
 - `opengl_state_tests.c` (no display): compiles the actual OpenGL driver into the test and captures
