@@ -165,3 +165,14 @@ Window-free tests, after a focused build, can run as:
 
 The native tests require the owner's private GPU runner; a headless pass is not native-pixel
 qualification. FNA3D-8 presentation and FNA3D-3 sample-mask support remain outside these repairs.
+
+### 2026-11-07 dependent texture dots
+
+`texreg_tests.c` additionally exercises `texdp3` and `texdp3tex`, with and without
+source `_bx2`, through every legal t0..t3 source/destination pair. Distinct per-stage
+coordinates yield literal RGBA88/96/104 for TEXDP3, or zero after signed clamping.
+TEXDP3TEX selects literal point-clamped lookup texels at (1,0), or (0,0) signed.
+Every 64x32 pixel must match. These add 24 draws per driver to the existing 24
+register-remapping draws, for 48 per driver across OpenGL, OpenGL ES 3 and SDL_GPU.
+The old MojoShader pin passes both GLSL controls but refuses the 24 new SDL_GPU
+programs. This is the public FNA3D Effect path, with no CNA adapter involved.

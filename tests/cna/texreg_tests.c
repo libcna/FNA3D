@@ -4,7 +4,10 @@
  * (3,0), (1,2), (0,1): floor(4 * selected byte / 255). RGB_bx2 has
  * negative x/y and clamps to (0,0). These are hand-derived texels.
  * Instruction contracts: learn.microsoft.com/en-us/windows/win32/direct3dhlsl/
- * texreg2ar---ps, texreg2gb---ps, texreg2rgb---ps. */
+ * texreg2ar---ps, texreg2gb---ps, texreg2rgb---ps, texdp3---ps, texdp3tex---ps.
+ * Dot coordinates for stage k are (2+k/4,1,-1/2,9). With the byte source,
+ * dot=(80+8k)/255; _bx2 makes it negative. DP3 outputs RGBA88/96/104 by stage.
+ * DP3TEX selects lookup texel (1,0), or (0,0) with _bx2. */
 #include "texture_fixture.h"
 
 static int TexRegProgram(int opcode, int source, int destination, int modifier)
@@ -13,6 +16,14 @@ static int TexRegProgram(int opcode, int source, int destination, int modifier)
 					 0x900F0001, 0x02000001, 0xC00F0000, 0x90E40000, 0x02000001, 0xE00F0000,
 					 0x90E40001, 0x02000001, 0xE00F0001, 0x90E40001, 0x02000001, 0xE00F0002,
 					 0x90E40001, 0x02000001, 0xE00F0003, 0x90E40001, 0x0000FFFF};
+	uint32_t dotVs[] = {0xFFFE0200, 0x0200001F, 0x80000000, 0x900F0000, 0x0200001F, 0x8000000A,
+						0x900F0001, 0x05000051, 0xA00F0000, 0x3e800000, 0,			0,
+						0,			0x05000051, 0xA00F0001, 0x3f000000, 0,			0,
+						0,			0x05000051, 0xA00F0002, 0x3f400000, 0,			0,
+						0,			0x02000001, 0xC00F0000, 0x90E40000, 0x02000001, 0xE00F0000,
+						0x90E40001, 0x03000002, 0xE00F0001, 0x90E40001, 0xA0E40000, 0x03000002,
+						0xE00F0002, 0x90E40001, 0xA0E40001, 0x03000002, 0xE00F0003, 0x90E40001,
+						0xA0E40002, 0x0000FFFF};
 	uint32_t ps[] = {0xFFFF0102,
 					 66,
 					 0xB00F0000u | (uint32_t)source,
@@ -23,11 +34,15 @@ static int TexRegProgram(int opcode, int source, int destination, int modifier)
 					 0x800F0000,
 					 0xB0E40000u | (uint32_t)destination,
 					 0x0000FFFF};
-	const float uv[4] = {.5f, .5f, 0, 1};
+	const float ordinary[4] = {.5f, .5f, 0, 1};
+	const float dotCoordinates[4] = {2, 1, -.5f, 9};
+	const int isDot = opcode == 83 || opcode == 85;
 	TestEffect code;
 	TestEffect_Vertex vertices[3];
 	MOJOSHADER_effect *data = NULL;
-	TestEffect_BuildPrograms(&code, vs, SDL_arraysize(vs), ps, SDL_arraysize(ps), 1);
+	TestEffect_BuildPrograms(&code, isDot ? dotVs : vs,
+							 isDot ? SDL_arraysize(dotVs) : SDL_arraysize(vs), ps,
+							 SDL_arraysize(ps), 1);
 	FNA3D_CreateEffect(device, (uint8_t *)code.words, code.length, &effect, &data);
 	Check(effect != NULL && data != NULL && data->error_count == 0, "texreg effect compiles");
 	if (effect == NULL || data == NULL || data->error_count != 0)
@@ -38,7 +53,7 @@ static int TexRegProgram(int opcode, int source, int destination, int modifier)
 			FNA3D_AddDisposeEffect(device, effect);
 		return 0;
 	}
-	TestEffect_FullscreenTriangle(vertices, uv);
+	TestEffect_FullscreenTriangle(vertices, isDot ? dotCoordinates : ordinary);
 	vb = FNA3D_GenVertexBuffer(device, 0, FNA3D_BUFFERUSAGE_WRITEONLY, sizeof(vertices));
 	Check(vb != NULL, "texreg vertex buffer exists");
 	if (vb == NULL)
@@ -54,9 +69,11 @@ static int TexRegProgram(int opcode, int source, int destination, int modifier)
 int main(void)
 {
 	static uint8_t first[] = {32, 96, 160, 224};
-	static const uint8_t expected[][4] = {
-		{160, 40, 91, 255}, {80, 120, 49, 255}, {40, 80, 14, 255}, {40, 40, 7, 255}};
-	static const int opcodes[] = {69, 70, 82, 82};
+	static const uint8_t expected[][4] = {{160, 40, 91, 255}, {80, 120, 49, 255}, {40, 80, 14, 255},
+										  {40, 40, 7, 255},	  {80, 40, 35, 255},  {40, 40, 7, 255},
+										  {0, 0, 0, 0},		  {0, 0, 0, 0}};
+	static const int opcodes[] = {69, 70, 82, 82, 83, 83, 85, 85};
+	static const int modifiers[] = {0, 0, 0, 4, 0, 4, 0, 4};
 	uint8_t grid[4 * 4 * 4], pixels[TW * TH * 4];
 	FNA3D_Texture *sourceTexture, *lookupTexture;
 	FNA3D_SamplerState sampler;
@@ -91,14 +108,21 @@ int main(void)
 	sampler.filter = FNA3D_TEXTUREFILTER_POINT;
 	sampler.addressU = sampler.addressV = sampler.addressW = FNA3D_TEXTUREADDRESSMODE_CLAMP;
 	sampler.maxAnisotropy = 1;
-	for (variant = 0; variant < 4; variant++)
+	for (variant = 0; variant < 8; variant++)
 		for (destination = 1; destination <= 3; destination++)
 			for (source = 0; source < destination; source++)
 			{
 				int same = 1, i;
+				uint8_t dotColor[4];
+				const uint8_t *wanted = expected[variant];
+				if (variant == 6)
+				{
+					SDL_memset(dotColor, 80 + 8 * destination, 4);
+					wanted = dotColor;
+				}
 				printf("texreg opcode=%d src=%d dst=%d signed=%d\n", opcodes[variant], source,
-					   destination, variant == 3);
-				if (!TexRegProgram(opcodes[variant], source, destination, variant == 3 ? 4 : 0))
+					   destination, modifiers[variant] != 0);
+				if (!TexRegProgram(opcodes[variant], source, destination, modifiers[variant]))
 					continue;
 				FNA3D_Clear(device, FNA3D_CLEAROPTIONS_TARGET, &clear, 1, 0);
 				for (stage = 0; stage < 4; stage++)
@@ -107,7 +131,7 @@ int main(void)
 				Draw(sourceTexture, 0, 0, TW);
 				FNA3D_ReadBackbuffer(device, 0, 0, TW, TH, pixels, sizeof(pixels));
 				for (i = 0; i < TW * TH; i++)
-					if (SDL_memcmp(pixels + i * 4, expected[variant], 4))
+					if (SDL_memcmp(pixels + i * 4, wanted, 4))
 					{
 						same = 0;
 						break;
@@ -115,13 +139,12 @@ int main(void)
 				if (!same)
 					fprintf(stderr, "pixel%d=(%u,%u,%u,%u), expected(%u,%u,%u,%u)\n", i,
 							pixels[i * 4], pixels[i * 4 + 1], pixels[i * 4 + 2], pixels[i * 4 + 3],
-							expected[variant][0], expected[variant][1], expected[variant][2],
-							expected[variant][3]);
-				Check(same, "every texreg pixel matches the independent selected texel");
+							wanted[0], wanted[1], wanted[2], wanted[3]);
+				Check(same, "every texture-instruction pixel matches the literal expected result");
 				EndProgram();
 				cases++;
 			}
-	Check(cases == 24, "all opcode/register/signed variants rendered");
+	Check(cases == 48, "all opcode/register/signed variants rendered");
 	FNA3D_AddDisposeTexture(device, sourceTexture);
 	FNA3D_AddDisposeTexture(device, lookupTexture);
 	return Finish();
