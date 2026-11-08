@@ -202,6 +202,22 @@ static int RunConfig(SDL_Window *window, const Config *config)
 	{
 		printf("%s: %d sample(s)\n", config->name, FNA3D_GetBackbufferMultiSampleCount(device));
 	}
+	if (SDL_strcmp(SDL_GetHint("FNA3D_FORCE_DRIVER") ? SDL_GetHint("FNA3D_FORCE_DRIVER") : "", "SDLGPU") == 0)
+	{
+		/* SDL's count domain is {0,2,4,8}. XNA's maximum-request rule
+		 * (QueryMultiSampleCount IL_0019-0044) never selects above the request. */
+		const int selected = FNA3D_GetMaxMultiSampleCount(device,
+			FNA3D_SURFACEFORMAT_COLOR, config->multiSampleCount);
+		CHECK(selected == 0 || selected == 2 || selected == 4 || selected == 8,
+			"%s: selected %d belongs to SDL's sample domain", config->name, selected);
+		CHECK(selected <= config->multiSampleCount, "%s: selected count does not exceed request", config->name);
+		CHECK(parameters.multiSampleCount == selected && FNA3D_GetBackbufferMultiSampleCount(device) == selected,
+			"%s: initial allocation and reported count match query", config->name);
+		parameters.multiSampleCount = config->multiSampleCount;
+		FNA3D_ResetBackbuffer(device, &parameters);
+		CHECK(parameters.multiSampleCount == selected && FNA3D_GetBackbufferMultiSampleCount(device) == selected,
+			"%s: reset allocation and reported count match query", config->name);
+	}
 
 	TestEffect_Build(&code, MOJOSHADER_USAGE_COLOR, 1);
 	FNA3D_CreateEffect(device, (uint8_t*) code.words, code.length, &effect, &effectData);
@@ -330,6 +346,16 @@ int main(int argc, char **argv)
 		{
 			return 1;
 		}
+	}
+	if (SDL_strcmp(SDL_GetHint("FNA3D_FORCE_DRIVER") ? SDL_GetHint("FNA3D_FORCE_DRIVER") : "", "SDLGPU") == 0)
+	{
+		const Config oddRequests[] = {
+			{ 48, 40, 3, "3-sample request" },
+			{ 48, 40, 5, "5-sample request" },
+			{ 48, 40, 7, "7-sample request" }
+		};
+		for (i = 0; i < SDL_arraysize(oddRequests); i += 1)
+			if (!RunConfig(window, &oddRequests[i])) return 1;
 	}
 
 	SDL_DestroyWindow(window);

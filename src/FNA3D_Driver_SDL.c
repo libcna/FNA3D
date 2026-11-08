@@ -37,27 +37,12 @@
 
 static inline SDL_GPUSampleCount XNAToSDL_SampleCount(int32_t sampleCount)
 {
-	if (sampleCount <= 1)
-	{
-		return SDL_GPU_SAMPLECOUNT_1;
-	}
-	else if (sampleCount == 2)
-	{
-		return SDL_GPU_SAMPLECOUNT_2;
-	}
-	else if (sampleCount <= 4)
-	{
-		return SDL_GPU_SAMPLECOUNT_4;
-	}
-	else if (sampleCount <= 8)
-	{
-		return SDL_GPU_SAMPLECOUNT_8;
-	}
-	else
-	{
-		FNA3D_LogWarn("Unexpected sample count: %d", sampleCount);
-		return SDL_GPU_SAMPLECOUNT_1;
-	}
+	/* Select from SDL's count domain without exceeding the request. This is
+	 * backend-specific: D3D9 can support odd sample counts as well. -CNA */
+	if (sampleCount >= 8) return SDL_GPU_SAMPLECOUNT_8;
+	if (sampleCount >= 4) return SDL_GPU_SAMPLECOUNT_4;
+	if (sampleCount >= 2) return SDL_GPU_SAMPLECOUNT_2;
+	return SDL_GPU_SAMPLECOUNT_1;
 }
 
 static inline float XNAToSDL_DepthBiasScale(SDL_GPUTextureFormat format)
@@ -2740,10 +2725,23 @@ static SDLGPU_TextureHandle* SDLGPU_INTERNAL_CreateTextureWithHandle(
 	return textureHandle;
 }
 
+static int32_t SDLGPU_GetMaxMultiSampleCount(
+	FNA3D_Renderer *driverData,
+	FNA3D_SurfaceFormat format,
+	int32_t multiSampleCount
+);
+
 static void SDLGPU_INTERNAL_CreateFauxBackbuffer(
 	SDLGPU_Renderer *renderer,
 	FNA3D_PresentationParameters *presentationParameters
 ) {
+	/* Match query, allocation and reported state, including initial creation
+	 * and ResetBackbuffer with noncanonical requests. -CNA */
+	presentationParameters->multiSampleCount = SDLGPU_GetMaxMultiSampleCount(
+		(FNA3D_Renderer*) renderer,
+		presentationParameters->backBufferFormat,
+		presentationParameters->multiSampleCount
+	);
 	SDL_GPUSampleCount sampleCount = XNAToSDL_SampleCount(presentationParameters->multiSampleCount);
 
 	if (sampleCount > SDL_GPU_SAMPLECOUNT_1)
@@ -4285,14 +4283,13 @@ static int32_t SDLGPU_GetMaxMultiSampleCount(
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
 
-	bool supports2 = SDL_GPUTextureSupportsSampleCount(renderer->device, XNAToSDL_SurfaceFormat[format], SDL_GPU_SAMPLECOUNT_2);
-	bool supports4 = SDL_GPUTextureSupportsSampleCount(renderer->device, XNAToSDL_SurfaceFormat[format], SDL_GPU_SAMPLECOUNT_4);
-	bool supports8 = SDL_GPUTextureSupportsSampleCount(renderer->device, XNAToSDL_SurfaceFormat[format], SDL_GPU_SAMPLECOUNT_8);
-
-	if (supports8) return SDL_min(multiSampleCount, 8);
-	if (supports4) return SDL_min(multiSampleCount, 4);
-	if (supports2) return SDL_min(multiSampleCount, 2);
-	return 1;
+	if (multiSampleCount >= 8 && SDL_GPUTextureSupportsSampleCount(
+		renderer->device, XNAToSDL_SurfaceFormat[format], SDL_GPU_SAMPLECOUNT_8)) return 8;
+	if (multiSampleCount >= 4 && SDL_GPUTextureSupportsSampleCount(
+		renderer->device, XNAToSDL_SurfaceFormat[format], SDL_GPU_SAMPLECOUNT_4)) return 4;
+	if (multiSampleCount >= 2 && SDL_GPUTextureSupportsSampleCount(
+		renderer->device, XNAToSDL_SurfaceFormat[format], SDL_GPU_SAMPLECOUNT_2)) return 2;
+	return 0;
 }
 
 /* Debugging */

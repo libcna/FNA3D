@@ -6,6 +6,8 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 
+static SDL_GPUTexture * SDLCALL TestTexture(SDL_GPUDevice*, const SDL_GPUTextureCreateInfo*);
+static bool SDLCALL TestSampleSupport(SDL_GPUDevice*, SDL_GPUTextureFormat, SDL_GPUSampleCount);
 static SDL_GPUSampler * SDLCALL TestSampler(SDL_GPUDevice*, const SDL_GPUSamplerCreateInfo*);
 static SDL_GPUCommandBuffer * SDLCALL TestAcquire(SDL_GPUDevice*);
 static bool SDLCALL TestSubmit(SDL_GPUCommandBuffer*);
@@ -21,6 +23,8 @@ static void SDLCALL TestUnmap(SDL_GPUDevice*, SDL_GPUTransferBuffer*);
 static void SDLCALL TestUpload(SDL_GPUCopyPass*, const SDL_GPUTextureTransferInfo*, const SDL_GPUTextureRegion*, bool);
 #define SDLGPUDriver CNACommand_SDLGPUDriver
 #define SDL_CreateGPUSampler TestSampler
+#define SDL_CreateGPUTexture TestTexture
+#define SDL_GPUTextureSupportsSampleCount TestSampleSupport
 #define SDL_AcquireGPUCommandBuffer TestAcquire
 #define SDL_SubmitGPUCommandBuffer TestSubmit
 #define SDL_BeginGPUCopyPass TestCopy
@@ -49,6 +53,20 @@ static const char *where;
 	fprintf(stderr, "FAILED %s: %s\n", where, message); } } while (0)
 void FNA3D_LogWarn(const char *fmt, ...) { (void)fmt; }
 void FNA3D_LogError(const char *fmt, ...) { (void)fmt; }
+static unsigned supportedSamples = 7;
+static SDL_GPUTexture * SDLCALL TestTexture(SDL_GPUDevice *device, const SDL_GPUTextureCreateInfo *info)
+{
+    (void)device; (void)info;
+    return (SDL_GPUTexture*)&textureToken;
+}
+static bool SDLCALL TestSampleSupport(SDL_GPUDevice *device, SDL_GPUTextureFormat format, SDL_GPUSampleCount count)
+{
+    (void)device;
+    CHECK(format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, "sample query preserves the requested color format");
+    return count == SDL_GPU_SAMPLECOUNT_2 ? (supportedSamples & 1) != 0 :
+           count == SDL_GPU_SAMPLECOUNT_4 ? (supportedSamples & 2) != 0 :
+           count == SDL_GPU_SAMPLECOUNT_8 ? (supportedSamples & 4) != 0 : true;
+}
 static SDL_GPUSampler * SDLCALL TestSampler(SDL_GPUDevice *device, const SDL_GPUSamplerCreateInfo *info)
 {
 	(void)device; samplerInfo = *info; samplerCalls++; return (SDL_GPUSampler*)&samplerToken;
@@ -237,8 +255,78 @@ static void DeferredPasses(void)
 		}
 	}
 }
+
+/* XNA Refresh GraphicsAdapter.QueryMultiSampleCount IL_0000-000d, 0019-0044:
+ * select the greatest supported integer <= request (cap16), <=1 means no MSAA.
+ * SDL's supported domain is {2,4,8}; D3D9 may also have odd counts. Literal
+ * full-support requests 3,5,7 therefore select 2,4,4, never 4,8,8. */
+static void Samples(void)
+{
+    const int requests[] = {-1,0,1,2,3,4,5,7,8,9,16};
+    const int fullExpected[] = {0,0,0,2,2,4,4,4,8,8,8};
+    const SDL_GPUSampleCount nativeExpected[] = {SDL_GPU_SAMPLECOUNT_1, SDL_GPU_SAMPLECOUNT_1,
+        SDL_GPU_SAMPLECOUNT_1, SDL_GPU_SAMPLECOUNT_2, SDL_GPU_SAMPLECOUNT_2,
+        SDL_GPU_SAMPLECOUNT_4, SDL_GPU_SAMPLECOUNT_4, SDL_GPU_SAMPLECOUNT_4,
+        SDL_GPU_SAMPLECOUNT_8, SDL_GPU_SAMPLECOUNT_8, SDL_GPU_SAMPLECOUNT_8};
+    unsigned mask, i;
+    where = "sample negotiation";
+    for (mask = 0; mask < 8; mask++)
+    {
+        SDLGPU_Renderer r;
+        SDL_zero(r); supportedSamples = mask;
+        for (i = 0; i < SDL_arraysize(requests); i++)
+        {
+            /* Exhaustive set-membership oracle, including sparse support sets. */
+            int expected = 0, candidate;
+            for (candidate = 2; candidate <= requests[i] && candidate <= 8; candidate++)
+                if ((candidate == 2 && (mask & 1)) || (candidate == 4 && (mask & 2)) ||
+                    (candidate == 8 && (mask & 4))) expected = candidate;
+            CHECK(SDLGPU_GetMaxMultiSampleCount((FNA3D_Renderer*)&r,
+                FNA3D_SURFACEFORMAT_COLOR, requests[i]) == expected, "query returns an actual supported count <= request");
+            CHECK(XNAToSDL_SampleCount(requests[i]) == nativeExpected[i], "native conversion rounds down within SDL's count domain");
+            if (mask == 7) CHECK(expected == fullExpected[i], "literal 3/5/7 query controls agree with set oracle");
+        }
+    }
+    supportedSamples = 7;
+    for (i = 0; i < SDL_arraysize(requests); i++)
+    {
+        SDLGPU_Renderer r;
+        FNA3D_PresentationParameters p;
+        SDLGPU_Renderbuffer *color, *depth;
+        SDL_zero(r); SDL_zero(p);
+        r.commandLock = SDL_CreateMutex(); r.renderTargetInUse = 1;
+        p.backBufferWidth = p.backBufferHeight = 4;
+        p.backBufferFormat = FNA3D_SURFACEFORMAT_COLOR;
+        p.depthStencilFormat = FNA3D_DEPTHFORMAT_D16;
+        p.multiSampleCount = requests[i];
+        SDLGPU_INTERNAL_CreateFauxBackbuffer(&r, &p);
+        CHECK(p.multiSampleCount == fullExpected[i], "backbuffer parameters report the selected count");
+        CHECK(SDLGPU_GetBackbufferMultiSampleCount((FNA3D_Renderer*)&r) == fullExpected[i],
+              "backbuffer readback count describes allocation");
+        CHECK(r.fauxBackbufferDepthStencil->createInfo.sample_count == nativeExpected[i],
+              "backbuffer depth uses the selected sample count");
+        CHECK((r.fauxBackbufferColorRenderbuffer != NULL) == (fullExpected[i] > 1),
+              "only multisampled requests allocate a resolve source");
+        if (r.fauxBackbufferColorRenderbuffer)
+            CHECK(r.fauxBackbufferColorRenderbuffer->createInfo.sample_count == nativeExpected[i],
+                  "backbuffer color allocation agrees with query and reporting");
+        CHECK(r.fauxBackbufferColorTexture->createInfo.sample_count == SDL_GPU_SAMPLECOUNT_1,
+              "the resolve texture stays single-sampled");
+        color = (SDLGPU_Renderbuffer*)SDLGPU_GenColorRenderbuffer((FNA3D_Renderer*)&r,
+            4, 4, FNA3D_SURFACEFORMAT_COLOR, requests[i], NULL);
+        depth = (SDLGPU_Renderbuffer*)SDLGPU_GenDepthStencilRenderbuffer((FNA3D_Renderer*)&r,
+            4, 4, FNA3D_DEPTHFORMAT_D16, requests[i]);
+        CHECK(color && depth, "native renderbuffer handles are made");
+        if (color) { CHECK(color->sampleCount == nativeExpected[i], "render-target color matches backbuffer rounding"); SDL_free(color->textureHandle); SDL_free(color); }
+        if (depth) { CHECK(depth->sampleCount == nativeExpected[i], "render-target depth matches backbuffer rounding"); SDL_free(depth->textureHandle); SDL_free(depth); }
+        SDL_free(r.fauxBackbufferColorRenderbuffer); SDL_free(r.fauxBackbufferColorTexture);
+        SDL_free(r.fauxBackbufferDepthStencil); SDL_DestroyMutex(r.commandLock);
+    }
+}
+
 int main(int argc, char **argv)
 {
+	if (argc == 1 || SDL_strcmp(argv[1], "samples") == 0) Samples();
 	if (argc == 1 || SDL_strcmp(argv[1], "ordering") == 0) Ordering();
 	if (argc == 1 || SDL_strcmp(argv[1], "mips") == 0) Mips();
 	if (argc == 1 || SDL_strcmp(argv[1], "passes") == 0) DeferredPasses();
