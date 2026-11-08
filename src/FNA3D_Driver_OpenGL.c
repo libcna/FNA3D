@@ -1601,7 +1601,8 @@ static void OPENGL_Clear(
 		clearMask |= GL_DEPTH_BUFFER_BIT;
 		if (depth != renderer->currentClearDepth)
 		{
-			if (renderer->supports_DoublePrecisionDepth)
+			/* ES 3 has only ClearDepthf; a non-NULL desktop dispatch stub is not support. */
+			if (!renderer->useES3 && renderer->supports_DoublePrecisionDepth)
 			{
 				renderer->glClearDepth((double) depth);
 			}
@@ -1850,7 +1851,7 @@ static void OPENGL_SetViewport(FNA3D_Renderer *driverData, FNA3D_Viewport *viewp
 		renderer->depthRangeMin = viewport->minDepth;
 		renderer->depthRangeMax = viewport->maxDepth;
 
-		if (renderer->supports_DoublePrecisionDepth)
+		if (!renderer->useES3 && renderer->supports_DoublePrecisionDepth)
 		{
 			renderer->glDepthRange(
 				(double) viewport->minDepth,

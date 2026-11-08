@@ -132,10 +132,75 @@ static void Mips(void)
 	}
 	CHECK(writes > 0, "the fixture exercised real GL parameter calls");
 }
+/* ES 3.2 specification sections 12.6.1 and 15.2.3 name DepthRangef and
+ * ClearDepthf; the desktop double entry points are not ES commands. A loader
+ * can still return non-NULL desktop dispatch stubs in an ES context. */
+static int doubleClears, floatClears, doubleRanges, floatRanges, depthClears;
+static double clearValue, nearValue, farValue;
+static void GLAPIENTRY ClearDepthDouble(GLdouble value)
+{
+	doubleClears++; clearValue = value;
+}
+static void GLAPIENTRY ClearDepthFloat(GLfloat value)
+{
+	floatClears++; clearValue = value;
+}
+static void GLAPIENTRY DepthRangeDouble(GLdouble nearDepth, GLdouble farDepth)
+{
+	doubleRanges++; nearValue = nearDepth; farValue = farDepth;
+}
+static void GLAPIENTRY DepthRangeFloat(GLfloat nearDepth, GLfloat farDepth)
+{
+	floatRanges++; nearValue = nearDepth; farValue = farDepth;
+}
+static void GLAPIENTRY ClearDepthBuffer(GLbitfield mask)
+{
+	CHECK(mask == GL_DEPTH_BUFFER_BIT, "depth-only clear forwards the depth bit");
+	depthClears++;
+}
+static void DepthApi(void)
+{
+	int es, doubleSupport;
+	where = "depth API profile";
+	for (es = 0; es < 2; es++) for (doubleSupport = 0; doubleSupport < 2; doubleSupport++)
+	{
+		OpenGLRenderer r;
+		FNA3D_Viewport viewport = {0, 0, 64, 32, .125f, .875f};
+		FNA3D_Vec4 unused = {0, 0, 0, 0};
+		/* Desktop keeps doubles when available; ES must use its float API even
+		 * when both desktop pointers are non-NULL (as Mesa's dispatch can be). */
+		const int wantDouble = !es && doubleSupport;
+		SDL_zero(r);
+		r.useES3 = es;
+		r.supports_DoublePrecisionDepth = doubleSupport;
+		r.glClearDepth = ClearDepthDouble; r.glClearDepthf = ClearDepthFloat;
+		r.glDepthRange = DepthRangeDouble; r.glDepthRangef = DepthRangeFloat;
+		r.glClear = ClearDepthBuffer;
+		r.currentClearDepth = 1; r.zWriteEnable = 1;
+		r.renderTargetBound = 1; r.viewport = viewport;
+		r.depthRangeMin = 0; r.depthRangeMax = 1;
+		doubleClears = floatClears = doubleRanges = floatRanges = depthClears = 0;
+		/* Repeat identical values: the API choice and cached-state behavior both matter. */
+		OPENGL_Clear((FNA3D_Renderer*)&r, FNA3D_CLEAROPTIONS_DEPTHBUFFER, &unused, .25f, 0);
+		OPENGL_Clear((FNA3D_Renderer*)&r, FNA3D_CLEAROPTIONS_DEPTHBUFFER, &unused, .25f, 0);
+		OPENGL_SetViewport((FNA3D_Renderer*)&r, &viewport);
+		OPENGL_SetViewport((FNA3D_Renderer*)&r, &viewport);
+		CHECK(doubleClears == wantDouble && floatClears == !wantDouble,
+			"ES depth clear uses ClearDepthf despite a non-NULL desktop function");
+		CHECK(doubleRanges == wantDouble && floatRanges == !wantDouble,
+			"ES depth range uses DepthRangef despite a non-NULL desktop function");
+		CHECK(depthClears == 2 && clearValue == .25, "both clears execute with the literal depth");
+		CHECK(nearValue == .125 && farValue == .875, "literal viewport range reaches the selected API");
+		CHECK(r.currentClearDepth == .25f && r.depthRangeMin == .125f && r.depthRangeMax == .875f,
+			"cached depths match the submitted float values");
+	}
+}
+
 int main(int argc, char **argv)
 {
 	if (argc == 1 || SDL_strcmp(argv[1], "stencil") == 0) Stencil();
 	if (argc == 1 || SDL_strcmp(argv[1], "mips") == 0) Mips();
+	if (argc == 1 || SDL_strcmp(argv[1], "depth") == 0) DepthApi();
 	printf("OpenGL state boundary: %d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;
 }

@@ -185,3 +185,30 @@ control-flow mutation that kills only those fragments passed with the former
 zero background; the nonzero background catches all six dropped-output cases.
 All existing literal color expectations remain in place. The mutation is restored
 byte-for-byte before the pristine native harness is run.
+
+
+### Matrix depth witness (TQ-TEXM3X2DEPTH-01)
+
+`fna3d_cna_texreg_tests` adds 48 depth comparison draws per driver to the 48
+retained texture/dot draws. The public Effect path samples RGBA (32,96,160,224)
+and supplies independent numerator/denominator rows. Known clear depths bracket
+1/12, 191/252, and the mixed-modifier fractions 191/384 and 8/63. Zero denominator
+must produce 1, checked with both LESS and GREATER against 15/16. The rasterized
+depth is .9; the color clear is the nonzero (51,102,153,204) sentinel and expected
+passing output is opaque magenta. Every 64x32 pixel is checked, including all
+three legal source/PAD-stage pairs and all four modifier combinations. No
+out-of-range native depth expectation is asserted.
+
+`fna3d_cna_texreg_tests --depth-tokens-only` validates the exact 24 new native
+program pairs through SPIR-V, GLSL 1.20 and GLSL ES 3 without initializing SDL
+video or creating a device. It is a translation control, not a GPU witness.
+
+
+The ES3 depth probes also exposed a driver API-selection defect: a loader may
+return non-NULL desktop `glClearDepth`/`glDepthRange` stubs for an ES context.
+ES3 must use `glClearDepthf`/`glDepthRangef` (ES 3.2 sections 15.2.3 and 12.6.1).
+`fna3d_cna_opengl_state_tests depth` captures the actual driver boundary without
+a device: all four ES/desktop and double-pointer availability combinations,
+literal clear/range values, and redundant-state caching. Restoring either wrong
+API choice fails its respective assertion. The native depth fractions, clear
+brackets and color expectations remain unchanged.
