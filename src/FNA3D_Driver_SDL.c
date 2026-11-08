@@ -4030,6 +4030,9 @@ static void SDLGPU_CreateEffect(
 	shaderBackend.f = NULL;
 	shaderBackend.malloc_data = NULL;
 
+	/* compileEffect derives each ps_1.x sampler map from the effect's Texture binding and
+	 * typed texture parameter. NULL keeps the public default when no declaration exists;
+	 * a device-wide map would incorrectly merge stages reused across passes. -CNA */
 	*effectData = MOJOSHADER_compileEffect(
 		effectCode,
 		effectCodeLength,

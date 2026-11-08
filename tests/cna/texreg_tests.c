@@ -202,8 +202,16 @@ static void TexDepthPixels(FNA3D_Texture *sourceTexture, FNA3D_SamplerState *sam
 	if (depth != NULL) FNA3D_AddDisposeRenderbuffer(device, depth);
 }
 
+#include "sampler_inference_pixels.h"
+
 int main(int argc, char **argv)
 {
+    if (argc == 2 && SDL_strcmp(argv[1], "--inference-only") == 0)
+    {
+        if (!Start()) { fprintf(stderr, "startup: %s\n", SDL_GetError()); return 1; }
+        SamplerInferencePixels();
+        return Finish();
+    }
 	static uint8_t first[] = {32, 96, 160, 224};
 	static const uint8_t expected[][4] = {{160, 40, 91, 255}, {80, 120, 49, 255}, {40, 80, 14, 255},
 										  {40, 40, 7, 255},	  {80, 40, 35, 255},  {40, 40, 7, 255},

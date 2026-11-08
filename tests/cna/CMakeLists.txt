@@ -76,6 +76,8 @@ if(TARGET SDL3::SDL3)
 endif()
 foreach(variant opengl opengl_es3 sdlgpu)
 	add_test(NAME fna3d_cna_texreg_${variant} COMMAND fna3d_cna_texreg_tests)
+	add_test(NAME fna3d_cna_sampler_inference_${variant}
+		COMMAND fna3d_cna_texreg_tests --inference-only)
 	if(variant STREQUAL "opengl_es3")
 		set(environment "FNA3D_FORCE_DRIVER=OpenGL;FNA3D_OPENGL_FORCE_ES3=1")
 	elseif(variant STREQUAL "opengl")
@@ -83,7 +85,8 @@ foreach(variant opengl opengl_es3 sdlgpu)
 	else()
 		set(environment "FNA3D_FORCE_DRIVER=SDLGPU")
 	endif()
-	set_tests_properties(fna3d_cna_texreg_${variant} PROPERTIES ENVIRONMENT "${environment}" TIMEOUT 120)
+	set_tests_properties(fna3d_cna_texreg_${variant} fna3d_cna_sampler_inference_${variant}
+		PROPERTIES ENVIRONMENT "${environment}" TIMEOUT 120)
 endforeach()
 
 # mip_clamp: native API contract, independent of CNA's adapters.
