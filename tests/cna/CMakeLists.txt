@@ -5,6 +5,20 @@
 # on a desktop context and once on an OpenGL ES 3 one (FNA3D_OPENGL_FORCE_ES3), and on the SDL_GPU
 # driver; on Windows FNA3D_FORCE_DRIVER=D3D11 runs the same executables on Direct3D 11.
 
+# Compile public dispatch plus the trace writer against a counting driver even
+# when the installed library has tracing disabled. No video/GPU initialization.
+if(BUILD_SDL3 AND TARGET SDL3::SDL3)
+	add_executable(fna3d_cna_trace_preflight_tests trace_preflight_tests.c)
+	target_compile_definitions(fna3d_cna_trace_preflight_tests PRIVATE USE_SDL3)
+	target_include_directories(fna3d_cna_trace_preflight_tests PRIVATE
+		"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/MojoShader")
+	target_link_libraries(fna3d_cna_trace_preflight_tests PRIVATE SDL3::SDL3)
+	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/trace-preflight")
+	add_test(NAME fna3d_cna_trace_preflight COMMAND fna3d_cna_trace_preflight_tests)
+	set_tests_properties(fna3d_cna_trace_preflight PROPERTIES
+		WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/trace-preflight")
+endif()
+
 
 # texture_order: native API contract, independent of CNA's adapters.
 add_executable(fna3d_cna_texture_order_tests texture_order_tests.c)
@@ -319,9 +333,8 @@ else()
 		"fna3d_cna_replay_sdl2_* are not registered")
 endif()
 
-# One trace session spans overlapping devices, and a device that is not made ends the session it
-# was counted in (trace_overlap_tests.c), on each driver; it writes FNA3D_Trace.bin into a
-# directory of its own.
+# Trace overlap/foreign-window refusal, failed-creation cleanup and untraced
+# two-device foreign-window controls (trace_overlap_tests.c), on each driver.
 if(TRACING_SUPPORT)
 	add_executable(fna3d_cna_trace_overlap_tests trace_overlap_tests.c)
 	target_link_libraries(fna3d_cna_trace_overlap_tests PRIVATE FNA3D)

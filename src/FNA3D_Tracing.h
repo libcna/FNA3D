@@ -28,14 +28,14 @@
 
 #include "FNA3D.h"
 
-void FNA3D_Trace_CreateDevice(
+uint8_t FNA3D_Trace_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
 );
 
 void FNA3D_Trace_DestroyDevice(void);
 
-void FNA3D_Trace_SwapBuffers(
+uint8_t FNA3D_Trace_SwapBuffers(
 	FNA3D_Rect *sourceRectangle,
 	FNA3D_Rect *destinationRectangle,
 	void* overrideWindowHandle
@@ -393,9 +393,9 @@ void FNA3D_Trace_SetStringMarker(const char *text);
 
 void FNA3D_Trace_SetTextureName(void *texture, const char *text);
 
-#define TRACE_CREATEDEVICE FNA3D_Trace_CreateDevice(presentationParameters, debugMode);
+#define TRACE_CREATEDEVICE if (!FNA3D_Trace_CreateDevice(presentationParameters, debugMode)) return NULL;
 #define TRACE_DESTROYDEVICE FNA3D_Trace_DestroyDevice();
-#define TRACE_SWAPBUFFERS FNA3D_Trace_SwapBuffers(sourceRectangle, destinationRectangle, overrideWindowHandle);
+#define TRACE_SWAPBUFFERS if (!FNA3D_Trace_SwapBuffers(sourceRectangle, destinationRectangle, overrideWindowHandle)) return;
 #define TRACE_CLEAR FNA3D_Trace_Clear(options, color, depth, stencil);
 #define TRACE_DRAWINDEXEDPRIMITIVES FNA3D_Trace_DrawIndexedPrimitives(primitiveType, baseVertex, minVertexIndex, numVertices, startIndex, primitiveCount, indices, indexElementSize);
 #define TRACE_DRAWINSTANCEDPRIMITIVES FNA3D_Trace_DrawInstancedPrimitives(primitiveType, baseVertex, minVertexIndex, numVertices, startIndex, primitiveCount, instanceCount, indices, indexElementSize);

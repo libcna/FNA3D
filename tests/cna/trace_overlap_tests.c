@@ -1,24 +1,8 @@
-/* libcna fork regression test: one trace session spans overlapping devices (TRACING_SUPPORT only).
- *
- * The trace state is process-wide. A second CreateDevice while the first device lived used to
- * replace the trace buffer and its lock -- losing the first 64 MB buffer, the lock and the first
- * device's unflushed records, and truncating the trace file -- and the first DestroyDevice then
- * ended tracing under the second device. A CreateDevice that made no device opened a session no
- * DestroyDevice would end. (2026-10-26 remediation review, round 2, R7-04.)
- *
- * Run in a directory of its own, as it writes FNA3D_Trace.bin there:
- *
- *   1. a CreateDevice before FNA3D_PrepareWindowAttributes makes no device, and must leave no
- *      SDL allocation behind -- the session it was counted in ends with it;
- *   2. device A, a marker through A, device B, FNA3D_DestroyDevice(NULL), a marker through B,
- *      A destroyed, a marker through B, B destroyed: the SDL allocations must balance, and the
- *      trace must be exactly A's CreateDevice record, the three markers in order and one
- *      DestroyDevice record.
- *
- * Live SDL allocations are counted through SDL_SetMemoryFunctions, as dispose_tests.c does; the
- * sequence runs once first so that SDL and the driver make their one-time allocations.
- *
- * This file is part of the libcna fork of FNA3D; see tests/cna/README.md.
+/* libcna regression: traced device overlap and foreign-window presents refuse
+ * without changing the legacy one-device byte stream. SDL allocation ownership
+ * still balances, including failed driver creation and refused second creation.
+ * With tracing disabled, two real devices and foreign-window presents remain usable.
+ * See tests/cna/README.md.
  */
 
 #include <SDL3/SDL.h>
@@ -37,8 +21,7 @@
 #define MARK_SETSTRINGMARKER	56
 
 static const char markerFirst[] = "cna-r7-04: through the first device";
-static const char markerSecond[] = "cna-r7-04: through the second device";
-static const char markerAfter[] = "cna-r7-04: through the second, the first destroyed";
+static const char markerAfter[] = "cna-l41: first device survives refused overlap";
 
 static int checks = 0;
 static int failures = 0;
@@ -178,21 +161,17 @@ static int Overlap(SDL_Window *windowA, SDL_Window *windowB, Trace *expected)
 	AppendMarker(expected, markerFirst);
 
 	deviceB = FNA3D_CreateDevice(&parametersB, 0);
-	if (deviceB == NULL)
+	CHECK(deviceB == NULL, "an overlapping traced device is refused before creation");
+	if (deviceB != NULL)
 	{
-		fprintf(stderr, "FNA3D_CreateDevice failed for the second device\n");
-		FNA3D_DestroyDevice(deviceA);
-		return 0;
+		FNA3D_DestroyDevice(deviceB);
 	}
-	/* No device, so none of the session's ends. */
 	FNA3D_DestroyDevice(NULL);
-	FNA3D_SetStringMarker(deviceB, markerSecond);
-	AppendMarker(expected, markerSecond);
-
-	FNA3D_DestroyDevice(deviceA);
-	FNA3D_SetStringMarker(deviceB, markerAfter);
+	/* Neither a refused overlap nor a foreign-window present may end/corrupt A's trace. */
+	FNA3D_SwapBuffers(deviceA, NULL, NULL, windowB);
+	FNA3D_SetStringMarker(deviceA, markerAfter);
 	AppendMarker(expected, markerAfter);
-	FNA3D_DestroyDevice(deviceB);
+	FNA3D_DestroyDevice(deviceA);
 	{
 		const uint8_t mark = MARK_DESTROYDEVICE;
 		Append(expected, &mark, sizeof(mark));
@@ -286,11 +265,28 @@ int main(int argc, char **argv)
 	{
 		CHECK(	traceLength == expected.length &&
 			memcmp(trace, expected.bytes, expected.length) == 0,
-			"the trace (%zu bytes) is not the first device's CreateDevice, the three "
+			"the trace (%zu bytes) is not the first device's CreateDevice, the two "
 			"markers and one DestroyDevice (%zu bytes)", traceLength, expected.length);
 		free(trace);
 	}
 
+	SDL_SetHint("FNA3D_DISABLE_TRACING", "1");
+	{
+		FNA3D_PresentationParameters a, b;
+		FNA3D_Device *da, *db;
+		Parameters(&a, windowA, 64);
+		Parameters(&b, windowB, 32);
+		da = FNA3D_CreateDevice(&a, 0);
+		db = FNA3D_CreateDevice(&b, 0);
+		CHECK(da && db, "two devices remain supported with tracing disabled");
+		if (da && db)
+		{
+			FNA3D_SwapBuffers(da, NULL, NULL, windowB);
+			FNA3D_SwapBuffers(db, NULL, NULL, windowA);
+		}
+		FNA3D_DestroyDevice(da);
+		FNA3D_DestroyDevice(db);
+	}
 	SDL_DestroyWindow(windowB);
 	SDL_DestroyWindow(windowA);
 	SDL_Quit();

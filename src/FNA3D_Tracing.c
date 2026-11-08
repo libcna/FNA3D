@@ -227,34 +227,31 @@ static void FNA3D_Trace_FlushMemory()
 	traceBufferCurrentSize = 0;
 }
 
-void FNA3D_Trace_CreateDevice(
+uint8_t FNA3D_Trace_CreateDevice(
 	FNA3D_PresentationParameters *presentationParameters,
 	uint8_t debugMode
 ) {
 	SDL_IOStream* traceFile;
 
-	/* CNA: a trace session lasts from the first device's CreateDevice to the last device's
-	 * DestroyDevice. A device created while another lives joins the session (enabled or not):
-	 * its calls go into the same trace, as no record names a device, and it opens no second
-	 * buffer and lock over the first's -- which used to be lost, with the first device's
-	 * unflushed records -- and writes no second CreateDevice record, which replay would refuse;
-	 * nor does the first device's DestroyDevice end the trace under the second.
-	 */
+	/* The legacy format has no device identity. Refuse overlap before recording or
+	 * creating a driver device, preserving one-device trace bytes and replay. -CNA */
+	if (traceDeviceCount > 0 && traceEnabled)
+	{
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+			"FNA3D tracing: overlapping devices unsupported; disable tracing before creating the first device");
+		return 0;
+	}
 	traceDeviceCount += 1;
 	if (traceDeviceCount > 1)
 	{
-		if (traceEnabled)
-		{
-			SDL_Log("FNA3D tracing: another device joins the trace");
-		}
-		return;
+		return 1;
 	}
 
 	traceEnabled = !SDL_GetHintBoolean("FNA3D_DISABLE_TRACING", SDL_FALSE);
 	if (!traceEnabled)
 	{
 		SDL_Log("FNA3D tracing disabled!");
-		return;
+		return 1;
 	}
 	SDL_Log("FNA3D tracing started!");
 	traceFile = SDL_IOFromFile("FNA3D_Trace.bin", "wb");
@@ -273,6 +270,7 @@ void FNA3D_Trace_CreateDevice(
 	WRITE(presentationParameters->displayOrientation);
 	WRITE(presentationParameters->renderTargetUsage);
 	WRITE(debugMode);
+	return 1;
 }
 
 void FNA3D_Trace_DestroyDevice(void)
@@ -332,7 +330,7 @@ void FNA3D_Trace_DestroyDevice(void)
 	traceLock = NULL;
 }
 
-void FNA3D_Trace_SwapBuffers(
+uint8_t FNA3D_Trace_SwapBuffers(
 	FNA3D_Rect *sourceRectangle,
 	FNA3D_Rect *destinationRectangle,
 	void* overrideWindowHandle
@@ -342,11 +340,16 @@ void FNA3D_Trace_SwapBuffers(
 
 	if (!traceEnabled)
 	{
-		return;
+		return 1;
 	}
 
-	SDL_assert(	overrideWindowHandle == NULL ||
-			overrideWindowHandle == windowHandle	);
+	/* A foreign window is also unrepresentable in the legacy trace. -CNA */
+	if (overrideWindowHandle != NULL && overrideWindowHandle != windowHandle)
+	{
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+			"FNA3D tracing: foreign-window SwapBuffers unsupported");
+		return 0;
+	}
 
 	SDL_LockMutex(traceLock);
 
@@ -370,6 +373,7 @@ void FNA3D_Trace_SwapBuffers(
 
 	FNA3D_Trace_FlushMemory();
 	SDL_UnlockMutex(traceLock);
+	return 1;
 }
 
 void FNA3D_Trace_Clear(
