@@ -1358,12 +1358,26 @@ static void OPENGL_SwapBuffers(
 ) {
 	int32_t srcX, srcY, srcW, srcH;
 	int32_t dstX, dstY, dstW, dstH;
+	int32_t windowW, windowH;
 	OpenGLRenderer *renderer = OPENGL_INTERNAL_Activate(driverData);
 
-	/* Only the faux-backbuffer supports presenting
-	 * specific regions given to Present().
-	 * -flibit
+	/* The context must target the window supplied to Present, even when it
+	 * is already current on the device's original window.
 	 */
+	if ((SDL_Window*) overrideWindowHandle != renderer->window)
+	{
+		#ifdef USE_SDL3
+		if (!SDL_GL_MakeCurrent((SDL_Window*) overrideWindowHandle, renderer->context))
+		#else
+		if (SDL_GL_MakeCurrent((SDL_Window*) overrideWindowHandle, renderer->context) < 0)
+		#endif
+		{
+			FNA3D_LogError("Could not select presentation window: %s", SDL_GetError());
+			return;
+		}
+	}
+	SDL_GetWindowSizeInPixels((SDL_Window*) overrideWindowHandle, &windowW, &windowH);
+
 	if (renderer->backbuffer->type == BACKBUFFER_TYPE_OPENGL)
 	{
 		if (sourceRectangle != NULL)
@@ -1391,11 +1405,8 @@ static void OPENGL_SwapBuffers(
 		{
 			dstX = 0;
 			dstY = 0;
-			SDL_GetWindowSizeInPixels(
-				(SDL_Window*) overrideWindowHandle,
-				&dstW,
-				&dstH
-			);
+			dstW = windowW;
+			dstH = windowH;
 		}
 
 		if (renderer->scissorTestEnable)
@@ -1403,13 +1414,11 @@ static void OPENGL_SwapBuffers(
 			renderer->glDisable(GL_SCISSOR_TEST);
 		}
 
-		if (	renderer->backbuffer->multiSampleCount > 0 &&
-			(srcX != dstX || srcY != dstY || srcW != dstW || srcH != dstH)	)
+		if (renderer->backbuffer->multiSampleCount > 0)
 		{
-			/* We have to resolve the renderbuffer to a texture first.
-			 * For whatever reason, we can't blit a multisample renderbuffer
-			 * to the backbuffer. Not sure why, but oh well.
-			 * -flibit
+			/* Resolve at identical bounds before cropping or scaling. This
+			 * also meets ES3's multisample blit restrictions (nearest filter
+			 * and matching source/destination bounds).
 			 */
 			if (renderer->backbuffer->opengl.texture == 0)
 			{
@@ -1444,7 +1453,7 @@ static void OPENGL_SwapBuffers(
 				0, 0, renderer->backbuffer->width, renderer->backbuffer->height,
 				0, 0, renderer->backbuffer->width, renderer->backbuffer->height,
 				GL_COLOR_BUFFER_BIT,
-				GL_LINEAR
+				GL_NEAREST
 			);
 			/* Invalidate the MSAA faux-backbuffer */
 			if (renderer->supports_ARB_invalidate_subdata)
@@ -1464,8 +1473,11 @@ static void OPENGL_SwapBuffers(
 		BindDrawFramebuffer(renderer, renderer->realBackbufferFBO);
 
 		renderer->glBlitFramebuffer(
-			srcX, srcY, srcW, srcH,
-			dstX, dstY, dstW, dstH,
+			/* FNA rectangles are top-left xywh; GL wants bottom-left endpoints. */
+			srcX, renderer->backbuffer->height - srcY - srcH,
+			srcX + srcW, renderer->backbuffer->height - srcY,
+			dstX, windowH - dstY - dstH,
+			dstX + dstW, windowH - dstY,
 			GL_COLOR_BUFFER_BIT,
 			renderer->backbufferScaleMode
 		);
@@ -1494,6 +1506,11 @@ static void OPENGL_SwapBuffers(
 	{
 		/* Nothing left to do, just swap! */
 		SDL_GL_SwapWindow((SDL_Window*) overrideWindowHandle);
+	}
+
+	if ((SDL_Window*) overrideWindowHandle != renderer->window)
+	{
+		SDL_GL_MakeCurrent(renderer->window, renderer->context);
 	}
 
 	/* Run any threaded commands */
@@ -3033,6 +3050,12 @@ static void OPENGL_INTERNAL_CreateBackbuffer(
 				drawY != parameters->backBufferHeight	);
 	useFauxBackbuffer = (	useFauxBackbuffer ||
 				(parameters->multiSampleCount > 0)	);
+	/* Keep the logical surface independent of native resizes and Present's
+	 * rectangles/window override. Waiting until SwapBuffers would lose draws
+	 * already made into a resized default framebuffer. ES3 supports this path.
+	 * Retain the legacy direct fallback only on hardware without framebuffer blits.
+	 */
+	useFauxBackbuffer = useFauxBackbuffer || renderer->supports_EXT_framebuffer_blit;
 
 	if (useFauxBackbuffer)
 	{

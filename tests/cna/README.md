@@ -164,7 +164,8 @@ Window-free tests, after a focused build, can run as:
       ctest --test-dir build -R '^fna3d_cna_(opengl_state|sdlgpu_command|pipeline_cache|sdlgpu_properties)$' --output-on-failure
 
 The native tests require the owner's private GPU runner; a headless pass is not native-pixel
-qualification. FNA3D-8 presentation and FNA3D-3 sample-mask support remain outside these repairs.
+qualification. FNA3D-3 sample-mask support remains outside these repairs; presentation coverage
+is described below.
 
 ### 2026-11-07 dependent texture dots
 
@@ -212,3 +213,28 @@ a device: all four ES/desktop and double-pointer availability combinations,
 literal clear/range values, and redundant-state caching. Restoring either wrong
 API choice fails its respective assertion. The native depth fractions, clear
 brackets and color expectations remain unchanged.
+
+### OpenGL presentation after native resize (TQ-FORK-GLPRESENT-01)
+
+- `presentation_tests.c` compiles the actual OpenGL driver with only the native
+  swap call wrapped. It inspects the window/default framebuffer just before the
+  real swap, rather than reading the logical backbuffer. A 64x64 logical surface
+  survives native resize to 160x96 without ResetBackbuffer, then presents into
+  (32,0,96,96). Four independently painted quadrants check scaling and orientation;
+  an asymmetric source crop and offset destination check xywh endpoints and both
+  Y origins. NULL rectangles fill the actual drawable; a differently sized second
+  window checks override selection and restoration. Both single-sample and 4x MSAA
+  run on desktop OpenGL and ES3. Margins retain a separately seeded blue sentinel.
+  Seed pixels are checked before presentation too. The override retains a dedicated
+  context so SDL/GLX's implicit drawable and its sentinel storage survive the device
+  context switching away; the presentation observer still uses the device context
+  on the requested native window. No expectation or tolerance changes.
+- The `presentation` group of `opengl_state_tests.c` runs without a display. It
+  executes real backbuffer creation and SwapBuffers with captured GL/SDL calls,
+  checking literal hand-derived endpoints, persistent logical allocation,
+  equal-bound nearest MSAA resolve, scissor state and framebuffer restoration,
+  and override window selection. Its oracle is FNA3D's public xywh contract,
+  FNA GraphicsDevice.Present's unchanged forwarding, and SDLGPU's swapchain blit.
+
+These supply fork coverage for FNA3D-8; native qualification must still run through
+CNA's private GPU runner. A passing call-boundary test alone does not qualify pixels.

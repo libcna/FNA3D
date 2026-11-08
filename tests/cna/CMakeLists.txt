@@ -455,3 +455,21 @@ if(TARGET SDL3::SDL3)
 	target_link_libraries(fna3d_cna_sdlgpu_command_tests PRIVATE SDL3::SDL3)
 endif()
 add_test(NAME fna3d_cna_sdlgpu_command COMMAND fna3d_cna_sdlgpu_command_tests)
+
+# Observe the native default framebuffer at the actual GL swap boundary.
+add_executable(fna3d_cna_presentation_tests presentation_tests.c)
+target_link_libraries(fna3d_cna_presentation_tests PRIVATE FNA3D)
+target_include_directories(fna3d_cna_presentation_tests PRIVATE
+	"${PROJECT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}/MojoShader")
+if(TARGET SDL3::SDL3)
+	target_link_libraries(fna3d_cna_presentation_tests PRIVATE SDL3::SDL3)
+endif()
+foreach(variant opengl opengl_es3)
+	add_test(NAME fna3d_cna_presentation_${variant} COMMAND fna3d_cna_presentation_tests)
+	set(environment "FNA3D_FORCE_DRIVER=OpenGL;SDL_ASSERT=abort")
+	if(variant STREQUAL "opengl_es3")
+		list(APPEND environment "FNA3D_OPENGL_FORCE_ES3=1")
+	endif()
+	set_tests_properties(fna3d_cna_presentation_${variant} PROPERTIES
+		ENVIRONMENT "${environment}" TIMEOUT 30)
+endforeach()

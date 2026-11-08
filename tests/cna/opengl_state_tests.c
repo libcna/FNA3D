@@ -6,11 +6,20 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 
+static bool StateWindowSize(SDL_Window *window, int *w, int *h);
+static bool StateSwap(SDL_Window *window);
+static bool StateMakeCurrent(SDL_Window *window, SDL_GLContext context);
+#define SDL_GetWindowSizeInPixels StateWindowSize
+#define SDL_GL_SwapWindow StateSwap
+#define SDL_GL_MakeCurrent StateMakeCurrent
 #define OpenGLDriver CNAState_OpenGLDriver
 #define MOJOSHADER_glProgramPixelCenterInfo CNAState_PixelCenter
 #include "FNA3D_Driver_OpenGL.c"
 #undef MOJOSHADER_glProgramPixelCenterInfo
 #undef OpenGLDriver
+#undef SDL_GetWindowSizeInPixels
+#undef SDL_GL_SwapWindow
+#undef SDL_GL_MakeCurrent
 
 static int checks, failures, draws, writes;
 static GLenum functions[2], operations[2][3];
@@ -196,11 +205,119 @@ static void DepthApi(void)
 	}
 }
 
+/* FNA3D.h: Rect is xywh and Present updates a window region. FNA
+ * GraphicsDevice.Present passes both rectangles unchanged. The SDL GPU driver
+ * uses xywh with the override swapchain's dimensions. GL endpoints below are
+ * independently derived: (x,H-y-h,x+w,H-y), for each surface's own H.
+ */
+static int physicalW, physicalH, swaps, blits, switches, disables, enables;
+static int endpoints[2][8];
+static GLenum filters[2];
+static SDL_Window *currentWindow, *swappedWindow;
+static bool StateWindowSize(SDL_Window *window, int *w, int *h)
+{
+	(void)window; *w = physicalW; *h = physicalH; return true;
+}
+static bool StateSwap(SDL_Window *window)
+{
+	CHECK(window == currentWindow, "swap uses the current drawable");
+	swaps++; swappedWindow = window; return true;
+}
+static bool StateMakeCurrent(SDL_Window *window, SDL_GLContext context)
+{
+	(void)context; switches++; currentWindow = window; return true;
+}
+static void GLAPIENTRY PresentBlit(GLint x0, GLint y0, GLint x1, GLint y1,
+	GLint dx0, GLint dy0, GLint dx1, GLint dy1, GLbitfield mask, GLenum filter)
+{
+	int values[8] = {x0,y0,x1,y1,dx0,dy0,dx1,dy1};
+	CHECK(blits < 2 && mask == GL_COLOR_BUFFER_BIT, "at most resolve plus color presentation");
+	if (blits < 2) { SDL_memcpy(endpoints[blits], values, sizeof(values)); filters[blits] = filter; }
+	blits++;
+}
+static void GLAPIENTRY PresentBind(GLenum target, GLuint handle) { (void)target; (void)handle; }
+static void GLAPIENTRY PresentGen(GLsizei count, GLuint *handles)
+{
+	int i; for (i = 0; i < count; i++) handles[i] = 7 + i;
+}
+static void GLAPIENTRY PresentStorage(GLenum target, GLenum format, GLsizei w, GLsizei h)
+{ (void)target; (void)format; CHECK(w == 64 && h == 64, "logical allocation survives physical resize"); }
+static void GLAPIENTRY PresentAttach(GLenum target, GLenum attachment, GLenum type, GLuint handle)
+{ (void)target; (void)attachment; (void)type; (void)handle; }
+static void GLAPIENTRY PresentTexture(GLenum target, GLenum attachment, GLenum type, GLuint handle, GLint level)
+{ (void)target; (void)attachment; (void)type; (void)handle; (void)level; }
+static void GLAPIENTRY PresentDisable(GLenum state) { CHECK(state == GL_SCISSOR_TEST, "only scissor disabled"); disables++; }
+static void GLAPIENTRY PresentEnable(GLenum state) { CHECK(state == GL_SCISSOR_TEST, "only scissor restored"); enables++; }
+static void Presentation(void)
+{
+	/* Literal endpoints: original witness, asymmetric crop+offset, and NULL
+	 * rectangles on a differently sized override window. MSAA uses identical
+	 * full-surface resolve bounds (0,0,64,64) before the same presentation.
+	 */
+	static const int expected[][8] = {
+		{0,0,64,64,32,0,128,96},
+		{8,28,32,60,17,31,89,79},
+		{0,0,64,64,0,0,200,120}
+	};
+	static const int resolve[8] = {0,0,64,64,0,0,64,64};
+	FNA3D_Rect source = {8,4,24,32}, destination = {32,0,96,96};
+	FNA3D_Rect offset = {17,17,72,48};
+	FNA3D_PresentationParameters p;
+	OpenGLRenderer r;
+	int windowA, windowB, i, msaa;
+	where = "presentation";
+	SDL_zero(r); SDL_zero(p);
+	p.deviceWindowHandle = &windowA; p.backBufferWidth = p.backBufferHeight = 64;
+	p.depthStencilFormat = FNA3D_DEPTHFORMAT_NONE;
+	r.supports_EXT_framebuffer_blit = 1;
+	r.glGenFramebuffers = PresentGen; r.glGenRenderbuffers = PresentGen;
+	r.glBindFramebuffer = PresentBind; r.glBindRenderbuffer = PresentBind;
+	r.glRenderbufferStorage = PresentStorage; r.glFramebufferRenderbuffer = PresentAttach;
+	r.glBlitFramebuffer = PresentBlit; r.glFramebufferTexture2D = PresentTexture;
+	r.glDisable = PresentDisable; r.glEnable = PresentEnable;
+	physicalW = physicalH = 64;
+	OPENGL_INTERNAL_CreateBackbuffer(&r, &p);
+	CHECK(r.backbuffer != NULL && r.backbuffer->type == BACKBUFFER_TYPE_OPENGL,
+		"even an initially window-sized surface is independent of the drawable");
+	/* Simulate a native-only resize, without ResetBackbuffer. */
+	physicalW = 160; physicalH = 96;
+	r.scissorTestEnable = 1; r.backbufferScaleMode = GL_LINEAR;
+	r.resolveFramebufferDraw = 11;
+	for (msaa = 0; msaa < 2; msaa++) for (i = 0; i < 3; i++)
+	{
+		FNA3D_Rect *src = i == 1 ? &source : NULL;
+		FNA3D_Rect *dst = i == 0 ? &destination : i == 1 ? &offset : NULL;
+		SDL_Window *window = i == 2 ? (SDL_Window*)&windowB : r.window;
+		r.backbuffer->multiSampleCount = msaa ? 4 : 0;
+		r.backbuffer->opengl.texture = 9; /* Already allocated resolve texture. */
+		physicalW = i == 2 ? 200 : 160; physicalH = i == 2 ? 120 : 96;
+		currentWindow = r.window;
+		swaps = blits = switches = disables = enables = 0;
+		OPENGL_SwapBuffers((FNA3D_Renderer*)&r, src, dst, window);
+		CHECK(blits == 1 + msaa, "every frame blits, resolving MSAA first");
+		CHECK(SDL_memcmp(endpoints[msaa], expected[i], sizeof(expected[i])) == 0,
+			"source/destination top-left xywh reach GL as full endpoints");
+		CHECK(filters[msaa] == GL_LINEAR, "presentation retains selected scaling filter");
+		if (msaa) {
+			CHECK(SDL_memcmp(endpoints[0], resolve, sizeof(resolve)) == 0 && filters[0] == GL_NEAREST,
+				"MSAA resolves with identical bounds and ES3-compatible nearest filter");
+		}
+		CHECK(swaps == 1 && swappedWindow == window, "exactly one swap targets requested window");
+		CHECK(currentWindow == r.window && switches == (i == 2 ? 2 : 0),
+			"override drawable is selected then original drawable restored");
+		CHECK(disables == 1 && enables == 1, "scissor cannot clip presentation and is restored");
+		CHECK(r.currentReadFramebuffer == r.backbuffer->opengl.handle &&
+			r.currentDrawFramebuffer == r.backbuffer->opengl.handle, "logical framebuffer restored");
+	}
+	SDL_free(r.backbuffer);
+}
+
 int main(int argc, char **argv)
 {
 	if (argc == 1 || SDL_strcmp(argv[1], "stencil") == 0) Stencil();
 	if (argc == 1 || SDL_strcmp(argv[1], "mips") == 0) Mips();
 	if (argc == 1 || SDL_strcmp(argv[1], "depth") == 0) DepthApi();
+	if (argc == 1 || SDL_strcmp(argv[1], "presentation") == 0) Presentation();
 	printf("OpenGL state boundary: %d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;
 }
