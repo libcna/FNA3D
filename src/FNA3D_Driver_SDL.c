@@ -1136,6 +1136,7 @@ static void SDLGPU_SwapBuffers(
 	SDL_GPUBlitInfo blitInfo;
 	uint32_t width, height;
 	uint32_t i;
+	bool refused = false;
 
 	SDL_LockMutex(renderer->commandLock);
 	SDLGPU_INTERNAL_EndCopyPass(renderer);
@@ -1149,7 +1150,41 @@ static void SDLGPU_SwapBuffers(
 		return;
 	}
 
-	if (SDL_WaitAndAcquireGPUSwapchainTexture(
+	/* An acquired swapchain texture holds whichever earlier frame last used
+	 * that image, not the previous presentation, so a blit into part of it
+	 * cannot keep the pixels outside the destination rectangle. Refuse such a
+	 * rectangle before acquiring, so the window keeps what it shows instead
+	 * of presenting undefined pixels; the frame's commands are still
+	 * submitted (CNA FNA3D-8). A rectangle covering exactly the whole drawable
+	 * is an ordinary presentation.
+	 */
+	if (destinationRectangle != NULL)
+	{
+		int windowW = 0, windowH = 0;
+		SDL_GetWindowSizeInPixels(
+			(SDL_Window*) overrideWindowHandle,
+			&windowW,
+			&windowH
+		);
+		if (	destinationRectangle->x != 0 ||
+			destinationRectangle->y != 0 ||
+			destinationRectangle->w != windowW ||
+			destinationRectangle->h != windowH	)
+		{
+			FNA3D_LogError(
+				"SDL GPU cannot present into destination rectangle (%d,%d,%d,%d) of a %dx%d window: it cannot preserve the pixels outside it",
+				destinationRectangle->x,
+				destinationRectangle->y,
+				destinationRectangle->w,
+				destinationRectangle->h,
+				windowW,
+				windowH
+			);
+			refused = true;
+		}
+	}
+
+	if (!refused && SDL_WaitAndAcquireGPUSwapchainTexture(
 		renderer->renderCommandBuffer,
 		overrideWindowHandle,
 		&swapchainTexture,

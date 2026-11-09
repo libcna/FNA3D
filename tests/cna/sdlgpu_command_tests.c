@@ -21,7 +21,13 @@ static void SDLCALL TestScissor(SDL_GPURenderPass*, const SDL_Rect*);
 static void * SDLCALL TestMap(SDL_GPUDevice*, SDL_GPUTransferBuffer*, bool);
 static void SDLCALL TestUnmap(SDL_GPUDevice*, SDL_GPUTransferBuffer*);
 static void SDLCALL TestUpload(SDL_GPUCopyPass*, const SDL_GPUTextureTransferInfo*, const SDL_GPUTextureRegion*, bool);
+static bool SDLCALL TestAcquireSwapchain(SDL_GPUCommandBuffer*, SDL_Window*, SDL_GPUTexture**, Uint32*, Uint32*);
+static void SDLCALL TestBlit(SDL_GPUCommandBuffer*, const SDL_GPUBlitInfo*);
+static bool SDLCALL TestWindowPixels(SDL_Window*, int*, int*);
 #define SDLGPUDriver CNACommand_SDLGPUDriver
+#define SDL_WaitAndAcquireGPUSwapchainTexture TestAcquireSwapchain
+#define SDL_BlitGPUTexture TestBlit
+#define SDL_GetWindowSizeInPixels TestWindowPixels
 #define SDL_CreateGPUSampler TestSampler
 #define SDL_CreateGPUTexture TestTexture
 #define SDL_GPUTextureSupportsSampleCount TestSampleSupport
@@ -51,8 +57,27 @@ static uint8_t transferBytes[256];
 static const char *where;
 #define CHECK(c, message) do { checks++; if (!(c)) { failures++; \
 	fprintf(stderr, "FAILED %s: %s\n", where, message); } } while (0)
+static int loggedErrors, swapchainAcquires, blits;
+static SDL_GPUBlitInfo seenBlit;
+static char windowToken, swapchainToken;
 void FNA3D_LogWarn(const char *fmt, ...) { (void)fmt; }
-void FNA3D_LogError(const char *fmt, ...) { (void)fmt; }
+void FNA3D_LogError(const char *fmt, ...) { (void)fmt; loggedErrors++; }
+static bool SDLCALL TestAcquireSwapchain(SDL_GPUCommandBuffer *command, SDL_Window *window,
+	SDL_GPUTexture **texture, Uint32 *w, Uint32 *h)
+{
+	(void)command; (void)window; swapchainAcquires++;
+	*texture = (SDL_GPUTexture*)&swapchainToken; *w = 128; *h = 96;
+	return true;
+}
+static void SDLCALL TestBlit(SDL_GPUCommandBuffer *command, const SDL_GPUBlitInfo *info)
+{
+	(void)command; blits++; seenBlit = *info;
+}
+static bool SDLCALL TestWindowPixels(SDL_Window *window, int *w, int *h)
+{
+	(void)window; *w = 128; *h = 96;
+	return true;
+}
 static unsigned supportedSamples = 7;
 static SDL_GPUTexture * SDLCALL TestTexture(SDL_GPUDevice *device, const SDL_GPUTextureCreateInfo *info)
 {
@@ -324,12 +349,75 @@ static void Samples(void)
     }
 }
 
+/* CNA FNA3D-8: an acquired swapchain image holds whichever earlier frame last
+ * used it, so SDL GPU cannot keep the pixels outside a destination rectangle.
+ * The real SwapBuffers must refuse a rectangle that is not exactly the whole
+ * drawable (no swapchain acquire, no blit, one logged error, the frame's
+ * commands still submitted), and present the whole-drawable rectangle, no
+ * rectangle and a source-only rectangle as before. No GPU or window is used.
+ */
+static void Presentation(void)
+{
+	static const struct
+	{
+		const char *name;
+		int hasSource, hasDestination;
+		FNA3D_Rect source, destination;
+		int presents;
+	} cases[] = {
+		{ "no rectangles", 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, 1 },
+		{ "destination is the whole drawable", 0, 1, {0, 0, 0, 0}, {0, 0, 128, 96}, 1 },
+		{ "source only", 1, 0, {0, 0, 64, 48}, {0, 0, 0, 0}, 1 },
+		{ "destination is a region", 0, 1, {0, 0, 0, 0}, {32, 0, 96, 96}, 0 },
+		{ "destination one row short", 0, 1, {0, 0, 0, 0}, {0, 0, 128, 95}, 0 },
+		{ "destination shifted by one pixel", 0, 1, {0, 0, 0, 0}, {-1, 0, 128, 96}, 0 },
+		{ "destination larger than the drawable", 1, 1, {0, 0, 64, 48}, {0, 0, 256, 192}, 0 },
+	};
+	size_t i;
+	for (i = 0; i < SDL_arraysize(cases); i++)
+	{
+		SDLGPU_Renderer r;
+		SDLGPU_TextureHandle backbuffer;
+		SDL_Window *windows[1];
+		FNA3D_Rect source = cases[i].source, destination = cases[i].destination;
+		where = cases[i].name;
+		SDL_zero(r); SDL_zero(backbuffer); SDL_zero(seenBlit);
+		backbuffer.texture = (SDL_GPUTexture*)&textureToken;
+		backbuffer.createInfo.width = 128; backbuffer.createInfo.height = 96;
+		windows[0] = (SDL_Window*)&windowToken;
+		r.commandLock = SDL_CreateMutex();
+		r.fauxBackbufferColorTexture = &backbuffer;
+		r.windows = windows; r.numWindows = 1;
+		acquired = 0; submitted = 0; loggedErrors = 0; swapchainAcquires = 0; blits = 0;
+		SDLGPU_SwapBuffers((FNA3D_Renderer*)&r,
+			cases[i].hasSource ? &source : NULL,
+			cases[i].hasDestination ? &destination : NULL,
+			&windowToken);
+		CHECK(swapchainAcquires == cases[i].presents, "a swapchain image is acquired only for a presentation");
+		CHECK(blits == cases[i].presents, "only a presentation blits");
+		CHECK(loggedErrors == (cases[i].presents ? 0 : 1), "a refused rectangle is reported once, a presentation never");
+		CHECK(submitted == 2, "the frame's upload and render commands are submitted either way");
+		CHECK(r.numWindows == 1 && r.windows == windows, "the already-claimed window is not claimed again");
+		if (cases[i].presents && blits == 1)
+		{
+			CHECK(seenBlit.destination.texture == (SDL_GPUTexture*)&swapchainToken, "the blit targets the swapchain image");
+			CHECK(seenBlit.destination.x == 0 && seenBlit.destination.y == 0 &&
+				seenBlit.destination.w == 128 && seenBlit.destination.h == 96, "the blit covers the whole drawable");
+			CHECK(seenBlit.source.texture == (SDL_GPUTexture*)&textureToken, "the blit reads the faux back buffer");
+			CHECK(seenBlit.source.w == (cases[i].hasSource ? 64u : 128u) &&
+				seenBlit.source.h == (cases[i].hasSource ? 48u : 96u), "the source region is the requested one");
+		}
+		SDL_DestroyMutex(r.commandLock);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	if (argc == 1 || SDL_strcmp(argv[1], "samples") == 0) Samples();
 	if (argc == 1 || SDL_strcmp(argv[1], "ordering") == 0) Ordering();
 	if (argc == 1 || SDL_strcmp(argv[1], "mips") == 0) Mips();
 	if (argc == 1 || SDL_strcmp(argv[1], "passes") == 0) DeferredPasses();
+	if (argc == 1 || SDL_strcmp(argv[1], "presentation") == 0) Presentation();
 	printf("SDL GPU command boundary: %d checks, %d failed\n", checks, failures);
 	return failures ? 1 : 0;
 }
