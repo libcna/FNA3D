@@ -23,11 +23,9 @@ static void SDLCALL TestUnmap(SDL_GPUDevice*, SDL_GPUTransferBuffer*);
 static void SDLCALL TestUpload(SDL_GPUCopyPass*, const SDL_GPUTextureTransferInfo*, const SDL_GPUTextureRegion*, bool);
 static bool SDLCALL TestAcquireSwapchain(SDL_GPUCommandBuffer*, SDL_Window*, SDL_GPUTexture**, Uint32*, Uint32*);
 static void SDLCALL TestBlit(SDL_GPUCommandBuffer*, const SDL_GPUBlitInfo*);
-static bool SDLCALL TestWindowPixels(SDL_Window*, int*, int*);
 #define SDLGPUDriver CNACommand_SDLGPUDriver
 #define SDL_WaitAndAcquireGPUSwapchainTexture TestAcquireSwapchain
 #define SDL_BlitGPUTexture TestBlit
-#define SDL_GetWindowSizeInPixels TestWindowPixels
 #define SDL_CreateGPUSampler TestSampler
 #define SDL_CreateGPUTexture TestTexture
 #define SDL_GPUTextureSupportsSampleCount TestSampleSupport
@@ -73,11 +71,7 @@ static void SDLCALL TestBlit(SDL_GPUCommandBuffer *command, const SDL_GPUBlitInf
 {
 	(void)command; blits++; seenBlit = *info;
 }
-static bool SDLCALL TestWindowPixels(SDL_Window *window, int *w, int *h)
-{
-	(void)window; *w = 128; *h = 96;
-	return true;
-}
+
 static unsigned supportedSamples = 7;
 static SDL_GPUTexture * SDLCALL TestTexture(SDL_GPUDevice *device, const SDL_GPUTextureCreateInfo *info)
 {
@@ -351,10 +345,10 @@ static void Samples(void)
 
 /* CNA FNA3D-8: an acquired swapchain image holds whichever earlier frame last
  * used it, so SDL GPU cannot keep the pixels outside a destination rectangle.
- * The real SwapBuffers must refuse a rectangle that is not exactly the whole
- * drawable (no swapchain acquire, no blit, one logged error, the frame's
- * commands still submitted), and present the whole-drawable rectangle, no
- * rectangle and a source-only rectangle as before. No GPU or window is used.
+ * The real SwapBuffers must clear the swapchain to opaque black whenever the
+ * destination does not cover it exactly (a letterbox, a region Present) and
+ * leave a full-coverage blit DONT_CARE; every case presents exactly once,
+ * submits the frame and logs nothing. No GPU or window is used.
  */
 static void Presentation(void)
 {
@@ -363,15 +357,15 @@ static void Presentation(void)
 		const char *name;
 		int hasSource, hasDestination;
 		FNA3D_Rect source, destination;
-		int presents;
+		int clears;
 	} cases[] = {
-		{ "no rectangles", 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, 1 },
-		{ "destination is the whole drawable", 0, 1, {0, 0, 0, 0}, {0, 0, 128, 96}, 1 },
-		{ "source only", 1, 0, {0, 0, 64, 48}, {0, 0, 0, 0}, 1 },
-		{ "destination is a region", 0, 1, {0, 0, 0, 0}, {32, 0, 96, 96}, 0 },
-		{ "destination one row short", 0, 1, {0, 0, 0, 0}, {0, 0, 128, 95}, 0 },
-		{ "destination shifted by one pixel", 0, 1, {0, 0, 0, 0}, {-1, 0, 128, 96}, 0 },
-		{ "destination larger than the drawable", 1, 1, {0, 0, 64, 48}, {0, 0, 256, 192}, 0 },
+		{ "no rectangles", 0, 0, {0, 0, 0, 0}, {0, 0, 0, 0}, 0 },
+		{ "destination is the whole drawable", 0, 1, {0, 0, 0, 0}, {0, 0, 128, 96}, 0 },
+		{ "source only", 1, 0, {0, 0, 64, 48}, {0, 0, 0, 0}, 0 },
+		{ "letterbox destination", 0, 1, {0, 0, 0, 0}, {32, 0, 64, 96}, 1 },
+		{ "destination one row short", 0, 1, {0, 0, 0, 0}, {0, 0, 128, 95}, 1 },
+		{ "destination shifted by one pixel", 0, 1, {0, 0, 0, 0}, {1, 0, 127, 96}, 1 },
+		{ "source and region destination", 1, 1, {0, 0, 64, 48}, {16, 8, 32, 24}, 1 },
 	};
 	size_t i;
 	for (i = 0; i < SDL_arraysize(cases); i++)
@@ -393,20 +387,27 @@ static void Presentation(void)
 			cases[i].hasSource ? &source : NULL,
 			cases[i].hasDestination ? &destination : NULL,
 			&windowToken);
-		CHECK(swapchainAcquires == cases[i].presents, "a swapchain image is acquired only for a presentation");
-		CHECK(blits == cases[i].presents, "only a presentation blits");
-		CHECK(loggedErrors == (cases[i].presents ? 0 : 1), "a refused rectangle is reported once, a presentation never");
-		CHECK(submitted == 2, "the frame's upload and render commands are submitted either way");
+		CHECK(swapchainAcquires == 1 && blits == 1, "every case presents exactly once");
+		CHECK(loggedErrors == 0, "presentation logs nothing");
+		CHECK(submitted == 2, "the frame's upload and render commands are submitted");
 		CHECK(r.numWindows == 1 && r.windows == windows, "the already-claimed window is not claimed again");
-		if (cases[i].presents && blits == 1)
-		{
-			CHECK(seenBlit.destination.texture == (SDL_GPUTexture*)&swapchainToken, "the blit targets the swapchain image");
+		CHECK(seenBlit.destination.texture == (SDL_GPUTexture*)&swapchainToken, "the blit targets the swapchain image");
+		CHECK(seenBlit.source.texture == (SDL_GPUTexture*)&textureToken, "the blit reads the faux back buffer");
+		CHECK(seenBlit.load_op == (cases[i].clears ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_DONT_CARE),
+			"only a destination short of the whole swapchain clears it");
+		if (cases[i].clears)
+			CHECK(seenBlit.clear_color.r == 0.0f && seenBlit.clear_color.g == 0.0f &&
+				seenBlit.clear_color.b == 0.0f && seenBlit.clear_color.a == 1.0f,
+				"the uncovered swapchain pixels are opaque black");
+		if (cases[i].hasDestination)
+			CHECK(seenBlit.destination.x == (Uint32)destination.x && seenBlit.destination.y == (Uint32)destination.y &&
+				seenBlit.destination.w == (Uint32)destination.w && seenBlit.destination.h == (Uint32)destination.h,
+				"the blit lands in the requested rectangle");
+		else
 			CHECK(seenBlit.destination.x == 0 && seenBlit.destination.y == 0 &&
 				seenBlit.destination.w == 128 && seenBlit.destination.h == 96, "the blit covers the whole drawable");
-			CHECK(seenBlit.source.texture == (SDL_GPUTexture*)&textureToken, "the blit reads the faux back buffer");
-			CHECK(seenBlit.source.w == (cases[i].hasSource ? 64u : 128u) &&
-				seenBlit.source.h == (cases[i].hasSource ? 48u : 96u), "the source region is the requested one");
-		}
+		CHECK(seenBlit.source.w == (cases[i].hasSource ? 64u : 128u) &&
+			seenBlit.source.h == (cases[i].hasSource ? 48u : 96u), "the source region is the requested one");
 		SDL_DestroyMutex(r.commandLock);
 	}
 }

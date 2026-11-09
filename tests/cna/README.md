@@ -137,12 +137,11 @@ open an SDL window and create a real device, so they need a display (in CNA's ch
   clear, must be submitted before a later 2D/mipmapped/cube/volume update is recorded. The split
   must invalidate draw bindings, retain upload extents/face, and leave startup dummy uploads
   alone before attachments exist. Sampler cases require unsigned mip bounds and native cache
-  reuse. `presentation`: `SwapBuffers` refuses a destination rectangle that is not exactly the
-  whole drawable -- no swapchain acquire, no blit, one logged error, the frame's commands still
-  submitted -- because an acquired swapchain image holds an older frame and SDL GPU cannot keep
-  the pixels outside it (CNA FNA3D-8); no rectangle, the whole drawable and a source-only
-  rectangle present as before. These call-boundary checks complement rather than replace GPU
-  pixels. Both window-free
+  reuse. `presentation`: `SwapBuffers` clears the swapchain to opaque black whenever the
+  destination rectangle does not cover it exactly (a letterbox, a region Present), because an
+  acquired swapchain image holds an older frame and SDL GPU cannot keep the pixels outside it
+  (CNA FNA3D-8); a full-coverage blit stays DONT_CARE. These call-boundary checks complement
+  rather than replace GPU pixels. Both window-free
   executables run their whole set by default; `stencil`/`mips` and `ordering`/`mips` arguments
   respectively select a case group for baseline/mutation evidence.
 - `vface_tests.c` also probes actual two-sided stencil pixels on the backbuffer and a D24S8

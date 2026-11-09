@@ -1136,7 +1136,6 @@ static void SDLGPU_SwapBuffers(
 	SDL_GPUBlitInfo blitInfo;
 	uint32_t width, height;
 	uint32_t i;
-	bool refused = false;
 
 	SDL_LockMutex(renderer->commandLock);
 	SDLGPU_INTERNAL_EndCopyPass(renderer);
@@ -1150,41 +1149,7 @@ static void SDLGPU_SwapBuffers(
 		return;
 	}
 
-	/* An acquired swapchain texture holds whichever earlier frame last used
-	 * that image, not the previous presentation, so a blit into part of it
-	 * cannot keep the pixels outside the destination rectangle. Refuse such a
-	 * rectangle before acquiring, so the window keeps what it shows instead
-	 * of presenting undefined pixels; the frame's commands are still
-	 * submitted (CNA FNA3D-8). A rectangle covering exactly the whole drawable
-	 * is an ordinary presentation.
-	 */
-	if (destinationRectangle != NULL)
-	{
-		int windowW = 0, windowH = 0;
-		SDL_GetWindowSizeInPixels(
-			(SDL_Window*) overrideWindowHandle,
-			&windowW,
-			&windowH
-		);
-		if (	destinationRectangle->x != 0 ||
-			destinationRectangle->y != 0 ||
-			destinationRectangle->w != windowW ||
-			destinationRectangle->h != windowH	)
-		{
-			FNA3D_LogError(
-				"SDL GPU cannot present into destination rectangle (%d,%d,%d,%d) of a %dx%d window: it cannot preserve the pixels outside it",
-				destinationRectangle->x,
-				destinationRectangle->y,
-				destinationRectangle->w,
-				destinationRectangle->h,
-				windowW,
-				windowH
-			);
-			refused = true;
-		}
-	}
-
-	if (!refused && SDL_WaitAndAcquireGPUSwapchainTexture(
+	if (SDL_WaitAndAcquireGPUSwapchainTexture(
 		renderer->renderCommandBuffer,
 		overrideWindowHandle,
 		&swapchainTexture,
@@ -1227,11 +1192,28 @@ static void SDLGPU_SwapBuffers(
 			blitInfo.destination.h = height;
 		}
 
-		blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		/* An acquired swapchain texture holds whichever earlier frame last
+		 * used that image, not the previous presentation, so no load op can
+		 * keep the pixels outside a destination rectangle. A rectangle that
+		 * does not cover the whole swapchain (a letterbox, a region Present)
+		 * clears the rest to opaque black instead of presenting undefined
+		 * pixels (CNA FNA3D-8). A full-coverage blit overwrites every pixel.
+		 */
+		if (	blitInfo.destination.x == 0 &&
+			blitInfo.destination.y == 0 &&
+			blitInfo.destination.w == width &&
+			blitInfo.destination.h == height	)
+		{
+			blitInfo.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		}
+		else
+		{
+			blitInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+		}
 		blitInfo.clear_color.r = 0;
 		blitInfo.clear_color.g = 0;
 		blitInfo.clear_color.b = 0;
-		blitInfo.clear_color.a = 0;
+		blitInfo.clear_color.a = 1;
 		blitInfo.flip_mode = SDL_FLIP_NONE;
 		blitInfo.filter = SDL_GetHintBoolean("FNA3D_BACKBUFFER_SCALE_NEAREST", false) ?
 			SDL_GPU_FILTER_NEAREST :
